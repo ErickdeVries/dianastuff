@@ -853,8 +853,49 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
     return order_public(order)
 
 
+# Auto-complete: orders left in "dikirim" for this many days are marked
+# "selesai" automatically (buyer never confirmed receipt).
+AUTO_COMPLETE_DAYS = 3
+
+
+async def auto_complete_orders() -> None:
+    """Mark shipped orders as completed after AUTO_COMPLETE_DAYS days.
+
+    Uses `dikirim_at` when present, otherwise falls back to the newest
+    'dikirim' entry in status_history (for orders shipped before this field
+    existed).
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=AUTO_COMPLETE_DAYS)
+    candidates = await db.orders.find(
+        {"status": "dikirim", "deleted_at": None}
+    ).to_list(500)
+    for o in candidates:
+        shipped_at = o.get("dikirim_at")
+        if not shipped_at:
+            hist = [h for h in (o.get("status_history") or []) if h.get("status") == "dikirim" and h.get("at")]
+            shipped_at = hist[-1]["at"] if hist else o.get("created_at")
+        if not shipped_at:
+            continue
+        # Normalise to aware datetime for safe comparison.
+        if shipped_at.tzinfo is None:
+            shipped_at = shipped_at.replace(tzinfo=timezone.utc)
+        if shipped_at <= cutoff:
+            await db.orders.update_one(
+                {"id": o["id"]},
+                {"$set": {"status": "selesai"},
+                 "$push": {"status_history": {"status": "selesai", "at": now}}},
+            )
+            await sio.emit(
+                "order_status",
+                {"id": o.get("id"), "no_order": o.get("no_order"), "status": "selesai", "no_resi": o.get("no_resi")},
+                room=o.get("user_id"),
+            )
+
+
 @api_router.get("/orders")
 async def list_orders(user: dict = Depends(get_current_user)):
+    await auto_complete_orders()
     if user.get("role") == "admin":
         query: dict = {"deleted_at": None}
     else:
@@ -865,6 +906,7 @@ async def list_orders(user: dict = Depends(get_current_user)):
 
 @api_router.get("/orders/{order_id}")
 async def get_order(order_id: str, user: dict = Depends(get_current_user)):
+    await auto_complete_orders()
     doc = await db.orders.find_one({"id": order_id, "deleted_at": None}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
@@ -948,6 +990,9 @@ async def update_order_status(order_id: str, body: dict, admin: dict = Depends(r
         if not no_resi or not str(no_resi).strip():
             raise HTTPException(status_code=400, detail="No resi wajib diisi")
         update["no_resi"] = str(no_resi).strip()
+        # Timestamp used by the auto-complete sweep.
+        if doc.get("status") != "dikirim":
+            update["dikirim_at"] = datetime.now(timezone.utc)
     # Admin may set/adjust ongkir (manual) when packing.
     if body.get("ongkir") is not None:
         ongkir = max(0.0, float(body["ongkir"]))

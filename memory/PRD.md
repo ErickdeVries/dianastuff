@@ -117,6 +117,13 @@ Inter body. Language: Indonesian.
     Backend emit socket "order_received" ke room "admins" -> NotificationListener admin munculkan
     toast "Paket <no> sudah diterima <nama>" + refresh list. Admin tetap punya "Tandai Selesai"
     sebagai fallback.
+- Auto-Selesai: order status 'dikirim' otomatis jadi 'selesai' setelah AUTO_COMPLETE_DAYS (=3) hari
+  jika pembeli tak konfirmasi. `dikirim_at` diset saat status->dikirim; sweep `auto_complete_orders()`
+  dipanggil lazy di GET /orders & GET /orders/{id} (fallback ke status_history utk order lama),
+  emit "order_status" ke pembeli.
+- App name (app.json expo.name) = "dianastuff".
+- Upload foto Android diperkuat: derive name/ext & mime dari uri (fileName/mimeType sering null di
+  Android), Blob hanya untuk web, tidak set Content-Type manual (src/api/uploads.ts).
 
 
 ## Next Tasks

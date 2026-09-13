@@ -1,0 +1,40 @@
+{
+  "summary": "ITER 11 VERIFIED. Backend 7/7 asserted paths pass (1 conditional skip). Auto-Selesai works end-to-end: (a) an order in 'dikirim' with dikirim_at 4d ago auto-flips to 'selesai' the moment GET /api/orders is called, status_history gains a 'selesai' entry; (b) an order shipped now stays 'dikirim'; (c) fallback path (no dikirim_at field, only a stale 'dikirim' entry in status_history >3d ago) also auto-completes via GET /api/orders/{id}; (d) socket 'order_status' event with {id,no_order,status:'selesai',no_resi} is emitted to the buyer's user room (verified live via python-socketio subscribed to buyer session, event arrives within 1s of the triggering GET). Status-flow regression exercised: menunggu_konfirmasi -> sedang_dikemas -> dikirim (400 without no_resi, 200 with no_resi, dikirim_at is set on the doc) -> buyer POST /api/orders/{id}/terima -> selesai. Web upload regression exercised via headless Chromium mimicking uploads.ts's web Blob branch: POST /api/upload returned 200 with {path,url}, GET /api/files/... returns exactly the uploaded bytes with content-type image/png, PUT /api/profil_admin persists the new logo_url, subsequent GET reflects it, and the UI 'Simpan Perubahan' button on /dashboard/profil confirms with the 'Pengaturan toko tersimpan.' success toast. app.json name is 'dianastuff' — the new brand shows on the login screen and in the header logo. Admin /dashboard/pesanan still renders all status filter chips, print-label buttons on 4 orders (sedang_dikemas+dikirim), konfirmasi/kirim/update-resi actions on the appropriate cards; no red-screen / pageerror during navigation.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auto_complete_and_uploads.py",
+    "/app/test_reports/pytest/pytest_iter11_auto_complete.xml",
+    "/app/test_reports/screenshots/iter11_profil_before.jpeg",
+    "/app/test_reports/screenshots/iter11_profil_after.jpeg",
+    "/app/test_reports/screenshots/iter11_admin_pesanan.jpeg"
+  ],
+  "action_items": [
+    "None required for this round — auto-complete + web logo upload + status flow all verified. The Android-specific pick-and-upload path cannot be exercised from headless Chromium; the code change in uploads.ts (Blob path is web-only, native uses {uri,name,type}) is a code-review-only assertion — please dispatch the app to Expo Go / a native build for on-device sign-off before shipping.",
+    "(Cosmetic, carried from iter10, not fixed this round) Guard resi rendering when kurir is falsy in /app/frontend/app/dashboard/pesanan.tsx to avoid 'Resi (): ...' rendering on legacy orders."
+  ],
+  "critical_code_review_comments": [
+    "server.py auto_complete_orders(): correct — uses timezone-aware comparison via tz normalisation, tolerates orders that pre-date the dikirim_at field by falling back to the newest 'dikirim' status_history entry, and pushes a single 'selesai' history entry with $push (append-only, matches surrounding style). Emits 'order_status' to the buyer's user room only, which is correct — admin refresh happens on the next GET.",
+    "server.py PUT /orders/{id}/status: correctly sets dikirim_at ONLY when the previous status !== 'dikirim' (line 994), so a resi-only update on an already-dikirim order does not reset the timer. Good.",
+    "uploads.ts: Platform.OS === 'web' guard is the correct fix — Blob-from-fetch(uri) on Android returns a Blob whose .size can be 0 for content:// URIs, which is the classic zero-byte upload issue reported in Expo #25577. Deriving name/ext/mime from asset.uri when the picker doesn't supply them is a good hardening. NEVER manually set Content-Type in the fetch options — confirmed in this file.",
+    "profil.tsx: web upload flow verified end-to-end. testIDs upload-logo, upload-banner, save-profil, profil-success, profil-error are all present; save calls PUT /api/profil_admin with the correct payload and invalidates the ['profil_admin'] query on success. Consider adding a visible 'Mengunggah...' overlay on the banner box (the logo has a hint text but the banner overlay only swaps the icon to 'loading' — hard to notice on slow networks).",
+    "app.json: name='dianastuff' (line 3), slug still 'frontend' (unchanged, fine for the preview). iOS bundleIdentifier and Android package both updated to com.dianastuff.app — consistent."
+  ],
+  "updated_files": [
+    "Created /app/backend/tests/test_auto_complete_and_uploads.py (pytest suite: health, TestAutoComplete, TestWebUpload, TestStatusFlowRegression)."
+  ],
+  "success_rate": {
+    "backend": "7/7 asserted (100%); TestStatusFlowRegression conditionally skipped in the full-suite ordering when other tests consumed the last menunggu_konfirmasi candidate — passes in isolation and did pass in the first full run of the day.",
+    "frontend": "100% — /dashboard/profil web upload + save toast verified; /dashboard/pesanan chips + action buttons render; new 'dianastuff' brand visible on the login screen."
+  },
+  "seed_data_creation": "Cycled 1 buyer-owned order between dikirim<->selesai for the socket test and left it as 'selesai'. The regression test flipped one menunggu_konfirmasi -> sedang_dikemas -> dikirim -> selesai (owned by buyer). profil_admin.logo_url was mutated during upload verification and RESTORED to the original before finishing — confirmed via GET after teardown. If the next iteration needs fresh 'dikirim' orders, admin PUT /api/orders/{id}/status {status:'dikirim', no_resi:'...'} on any buyer-owned menunggu_konfirmasi/sedang_dikemas order.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Auth: use container testIDs 'username-input' + 'password-input' (Login screen fills the inner <input> — locator('[data-testid=\"username-input\"] input').fill(...)); switch tabs first via 'tab-whitelist' then submit via 'whitelist-login-button'. Token is stored in localStorage under 'diana_session_token' as JSON.stringify(token) — remember to JSON.parse before using as Bearer. Auto-complete window is 3 days (AUTO_COMPLETE_DAYS in server.py:858). To force auto-complete without waiting: async update in Mongo to set orders.$.dikirim_at to now-4d, then GET /api/orders. Socket path: python-socketio.Client() to `${BASE}` with socketio_path='/api/socket.io', transports=['websocket'], auth={'token': buyer_session_token}; subscribe to 'order_status' before triggering the GET. Web upload: multipart POST /api/upload with 'file' field (Bearer auth); returned url is '/api/files/{path}' and is publicly readable. If tests hit '401 Sesi tidak valid' after a fresh login, likely a stale token from localStorage — always JSON.parse the raw value.",
+  "rca_of_issue": "N/A — no bugs found. Only backend behaviour worth noting: auto_complete_orders() runs lazily on every GET /api/orders and GET /api/orders/{id}, so the first admin refresh of the day pays the sweep cost (500-doc scan, fast enough at current volumes). If order counts scale into tens of thousands, add a partial index on {status:'dikirim', dikirim_at:1} or move the sweep to a background task."
+}

@@ -33,17 +33,25 @@ export async function pickImages(limit: number): Promise<ImagePicker.ImagePicker
 
 export async function uploadAsset(asset: ImagePicker.ImagePickerAsset): Promise<{ path: string; url: string }> {
   const token = await getToken();
-  const name = asset.fileName || `photo_${Date.now()}.jpg`;
-  const type = asset.mimeType || "image/jpeg";
+  // Android often doesn't provide fileName/mimeType, so derive them from the
+  // local uri to guarantee a valid multipart schema (see Expo issue #25577).
+  const uriExt = (asset.uri.split("?")[0].split(".").pop() || "jpg").toLowerCase();
+  const safeExt = uriExt.length <= 5 ? uriExt : "jpg";
+  const name = asset.fileName || `photo_${Date.now()}.${safeExt}`;
+  const type = asset.mimeType || `image/${safeExt === "jpg" ? "jpeg" : safeExt}`;
 
   const form = new FormData();
   if (Platform.OS === "web") {
+    // On web the Blob approach is correct; on Android it can produce zero-byte
+    // payloads, so it is web-only.
     const blob = await (await fetch(asset.uri)).blob();
     form.append("file", blob, name);
   } else {
     form.append("file", { uri: asset.uri, name, type } as any);
   }
 
+  // IMPORTANT: never set Content-Type manually — fetch must add the multipart
+  // boundary itself, otherwise the server receives an empty body.
   const res = await fetch(`${BASE}/api/upload`, {
     method: "POST",
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
