@@ -1,0 +1,113 @@
+{
+  "app_name": "Diana Stuff",
+  "personality": "2 Material You / Expressive LIGHT",
+  "personality_one_liner": "A soft, expressive, and inviting Material 3 e-commerce entry point driven by tonal purple surfaces and rounded containers.",
+  "color": {
+    "surface": "#FAF5FF",
+    "onSurface": "#1A1124",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1A1124",
+    "surfaceTertiary": "#F3E8FF",
+    "onSurfaceTertiary": "#3B0764",
+    "surfaceInverse": "#2A1D38",
+    "onSurfaceInverse": "#F3E8FF",
+    "brand": "#A855F7",
+    "brandPrimary": "#A855F7",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#D8B4FE",
+    "onBrandSecondary": "#3B0764",
+    "brandTertiary": "#E9D5FF",
+    "onBrandTertiary": "#3B0764",
+    "success": "#10B981",
+    "onSuccess": "#FFFFFF",
+    "warning": "#F59E0B",
+    "onWarning": "#FFFFFF",
+    "error": "#EF4444",
+    "onError": "#FFFFFF",
+    "info": "#3B82F6",
+    "onInfo": "#FFFFFF",
+    "border": "#E5E7EB",
+    "borderStrong": "#A855F7",
+    "divider": "#F3F4F6",
+    "muted": "#6B7280",
+    "onBrand": "#FFFFFF"
+  },
+  "typography": {
+    "displayFontFamily": "Poppins",
+    "textFontFamily": "Inter",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Use Material 3 standard metrics: generous inner padding for cards, and 16px/24px screen margins. Group related input fields closely with sm spacing.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 8,
+    "md": 16,
+    "lg": 24,
+    "pill": 999
+  },
+  "shadow_tier": "0",
+  "navigation": "stack_only",
+  "icon_set": "MaterialCommunityIcons",
+  "glassmorphism": {
+    "enabled": false,
+    "do's": [],
+    "dont's": ["Do not use blur for Material You; rely on tonal separation (surfaceTertiary against surfaceSecondary)."]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Login",
+      "purpose": "A welcoming entry point allowing users to authenticate via Google or standard credentials, or request access via WhatsApp.",
+      "states": {
+        "loading": "Centered spinner replacing the form area.",
+        "empty": "N/A - Auth screen.",
+        "error": "M3 snackbar or inline red text below the fields."
+      },
+      "layout": "Top 25% of the screen is covered by `store_banner` with a vertical gradient scrim (transparent to surface). Overlapping the bottom edge of the banner is the `store_logo` in a circular pill border. Below this, display the store name 'Diana Stuff' in Poppins. Below, place a central `surfaceSecondary` Material 3 Card with `lg` radius. Inside the card: A custom segmented tab control (Login Gmail vs Login Whitelist) with the active tab highlighted using `brandTertiary`. The selected tab renders its respective form fields (Google tap vs text fields + Masuk button). Wrap the whole scroll view in a KeyboardAvoidingView. Anchor an Extended FAB style WhatsApp button at the very bottom of the screen (sticky), ensuring it has proper safe area spacing."
+    }
+  ],
+  "images": {
+    "store_banner": {
+      "url": "https://images.unsplash.com/photo-1483985988355-763728e1935b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNTl8MHwxfHNlYXJjaHwxfHxzaG9wcGluZyUyMGZhc2hpb24lMjBib3V0aXF1ZSUyMGJhbm5lcnxlbnwwfHx8fDE3ODkyOTIyMDZ8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Diana Stuff fashion store banner"
+    },
+    "store_logo": {
+      "url": "https://images.unsplash.com/photo-1638864616266-c390568f9092?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDZ8MHwxfHNlYXJjaHwxfHxlbGVnYW50JTIwYWJzdHJhY3QlMjBtaW5pbWFsJTIwbG9nbyUyMG1hcmt8ZW58MHx8fHwxNzg5MjkyMjA2fDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Diana Stuff store logo"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the Soft Purple (#A855F7) and #FAF5FF background constraints set by the user, incorporating them into a Material 3 Expressive/Tonal design language.",
+    "Use Poppins for headings and Inter for body text. Enforce font weights capped at 500 for a clean look.",
+    "Implement the segmented tabs using Material 3 chips/tonal indicators, avoiding iOS segmented control styles.",
+    "The login card should sit on the #FAF5FF surface background and use #FFFFFF (surfaceSecondary) for contrast, with inputs utilizing #F3E8FF (surfaceTertiary).",
+    "Make the WhatsApp button a Material 3 Adaptive CTA (e.g. Extended FAB or prominent Tonal Button) anchored to the bottom.",
+    "Include a fallback state for the WhatsApp button when the number is missing ('Hubungi admin untuk daftar' as text instead of a button).",
+    "Ensure 'Login Whitelist' includes standard username/password inputs, a Register ('Daftar') link, and handles the pending-approval UI state (e.g. an inline info message)."
+  ]
+}
