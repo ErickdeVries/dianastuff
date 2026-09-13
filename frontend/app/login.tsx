@@ -89,8 +89,8 @@ export default function LoginScreen() {
     <View style={styles.root}>
       <KeyboardAwareScrollView
         style={styles.root}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: 140 + insets.bottom }]}
-        bottomOffset={100}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 170 + insets.bottom }]}
+        bottomOffset={130}
         showsVerticalScrollIndicator={false}
       >
         {/* Banner + logo header */}
@@ -231,8 +231,9 @@ export default function LoginScreen() {
   );
 }
 
-const BANNER_HEIGHT = 220;
+const BANNER_HEIGHT = 260;
 const LOGO_SIZE = 88;
+const LOGO_OVERLAP = 32;
 
 const useStyles = makeStyles((colors) => ({
   root: {
@@ -245,7 +246,7 @@ const useStyles = makeStyles((colors) => ({
   header: {
     height: BANNER_HEIGHT,
     marginHorizontal: -20,
-    marginBottom: LOGO_SIZE / 2 + 8,
+    marginBottom: LOGO_OVERLAP + 8,
   },
   banner: {
     width: "100%",
@@ -261,7 +262,7 @@ const useStyles = makeStyles((colors) => ({
   },
   logoWrap: {
     position: "absolute",
-    bottom: -LOGO_SIZE / 2,
+    bottom: -LOGO_OVERLAP,
     left: 0,
     right: 0,
     alignItems: "center",
