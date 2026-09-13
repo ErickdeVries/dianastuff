@@ -116,7 +116,7 @@ export default function LoginScreen() {
         <Text style={styles.storeName} testID="store-name">
           {namaToko}
         </Text>
-        <Text style={styles.tagline}>Masuk untuk mulai belanja</Text>
+        <Text style={styles.tagline}>Cantik lengkap, cukup disini aja</Text>
 
         {/* Auth card */}
         <View style={styles.card} testID="login-card">

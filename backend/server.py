@@ -6,6 +6,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import re
 import uuid
 import secrets
 import bcrypt
@@ -153,6 +154,30 @@ class ProfilUpdate(BaseModel):
     banner_url: Optional[str] = None
     rekening_bank: List[RekeningBank] = Field(default_factory=list)
     whatsapp: str = ""
+    kurir_list: Optional[List[str]] = None
+
+
+class AddressUpdate(BaseModel):
+    nama: Optional[str] = None
+    wa: Optional[str] = None
+    alamat: str
+    kota: str
+    kode_pos: Optional[str] = None
+
+
+class OrderItemIn(BaseModel):
+    product_id: str
+    qty: int
+
+
+class OrderCreate(BaseModel):
+    items: List[OrderItemIn]
+    kurir: Optional[str] = None
+    ongkir: float = 0
+    catatan: Optional[str] = None
+
+
+DEFAULT_KURIR = ["JNE", "J&T", "Lion Parcel", "Gosend Instan/Sameday"]
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +410,7 @@ async def logout(authorization: Optional[str] = Header(None)):
 # Uploads / file serving (Emergent Object Storage)
 # ---------------------------------------------------------------------------
 @api_router.post("/upload")
-async def upload_file(file: UploadFile = File(...), admin: dict = Depends(require_admin)):
+async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     content = await file.read()
     if len(content) > 8 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Ukuran foto maksimal 8MB")
@@ -393,7 +418,7 @@ async def upload_file(file: UploadFile = File(...), admin: dict = Depends(requir
     ext = (file.filename or "img.jpg").rsplit(".", 1)[-1].lower()
     if len(ext) > 5:
         ext = "jpg"
-    path = f"{APP_NAME}/uploads/{admin['user_id']}/{uuid.uuid4().hex}.{ext}"
+    path = f"{APP_NAME}/uploads/{user['user_id']}/{uuid.uuid4().hex}.{ext}"
     try:
         await run_in_threadpool(put_object, path, content, content_type)
     except requests.HTTPError as e:
@@ -572,9 +597,168 @@ async def update_profil(payload: ProfilUpdate, admin: dict = Depends(require_adm
         "rekening_bank": [r.dict() for r in payload.rekening_bank],
         "whatsapp": payload.whatsapp.strip(),
     }
+    if payload.kurir_list is not None:
+        data["kurir_list"] = payload.kurir_list
     await db.profil_admin.update_one({}, {"$set": data}, upsert=True)
     profil = await db.profil_admin.find_one({}, {"_id": 0})
     return profil
+
+
+# ---------------------------------------------------------------------------
+# Buyer: address + ongkir + orders
+# ---------------------------------------------------------------------------
+def order_public(o: dict) -> dict:
+    return {
+        "id": o.get("id"),
+        "no_order": o.get("no_order"),
+        "user_id": o.get("user_id"),
+        "items": o.get("items", []),
+        "subtotal": o.get("subtotal", 0),
+        "ongkir": o.get("ongkir", 0),
+        "total": o.get("total", 0),
+        "status": o.get("status"),
+        "alamat": o.get("alamat"),
+        "kurir": o.get("kurir"),
+        "catatan": o.get("catatan"),
+        "bukti_bayar_url": o.get("bukti_bayar_url"),
+        "created_at": o.get("created_at").isoformat() if o.get("created_at") else None,
+    }
+
+
+@api_router.put("/me")
+async def update_me(payload: AddressUpdate, user: dict = Depends(get_current_user)):
+    if not payload.alamat or not payload.alamat.strip():
+        raise HTTPException(status_code=400, detail="Alamat wajib diisi")
+    if not payload.kota or not payload.kota.strip():
+        raise HTTPException(status_code=400, detail="Kota wajib diisi")
+    update = {
+        "alamat": payload.alamat.strip(),
+        "kota": payload.kota.strip(),
+        "kode_pos": (payload.kode_pos or "").strip() or None,
+    }
+    if payload.nama:
+        update["nama"] = payload.nama.strip()
+    if payload.wa:
+        update["wa"] = payload.wa.strip()
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": update})
+    doc = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    return public_user(doc)
+
+
+@api_router.get("/ongkir")
+async def cek_ongkir(kota: str, kurir: str, user: dict = Depends(get_current_user)):
+    row = await db.ongkir_manual.find_one(
+        {"kota": {"$regex": f"^{re.escape(kota.strip())}$", "$options": "i"}, "kurir": kurir},
+        {"_id": 0},
+    )
+    if not row:
+        return {"found": False, "harga": None}
+    return {"found": True, "harga": row.get("harga", 0)}
+
+
+@api_router.post("/orders")
+async def create_order(payload: OrderCreate, user: dict = Depends(get_current_user)):
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="Keranjang kosong")
+    if not user.get("alamat") or not user.get("kota"):
+        raise HTTPException(status_code=400, detail="Lengkapi alamat pengiriman terlebih dahulu")
+
+    # Load products and validate stock.
+    order_items = []
+    subtotal = 0.0
+    for it in payload.items:
+        if it.qty <= 0:
+            continue
+        product = await db.products.find_one({"id": it.product_id, "deleted_at": None})
+        if not product:
+            raise HTTPException(status_code=404, detail="Produk tidak ditemukan")
+        if not product.get("bisa_po") and product.get("stok", 0) < it.qty:
+            raise HTTPException(status_code=400, detail=f"Stok {product['nama_produk']} tidak cukup")
+        line = product.get("harga", 0) * it.qty
+        subtotal += line
+        order_items.append({
+            "product_id": it.product_id,
+            "nama_produk": product.get("nama_produk"),
+            "harga": product.get("harga", 0),
+            "qty": it.qty,
+            "foto": (product.get("foto_urls") or [None])[0],
+            "subtotal": line,
+        })
+
+    if not order_items:
+        raise HTTPException(status_code=400, detail="Keranjang kosong")
+
+    # Decrement stock (PO products may go negative).
+    for it in order_items:
+        await db.products.update_one({"id": it["product_id"]}, {"$inc": {"stok": -it["qty"]}})
+
+    ongkir = max(0.0, payload.ongkir or 0)
+    total = subtotal + ongkir
+    now = datetime.now(timezone.utc)
+    no_order = f"DS-{now.strftime('%y%m%d')}-{secrets.token_hex(2).upper()}"
+
+    order = {
+        "id": uuid.uuid4().hex,
+        "no_order": no_order,
+        "user_id": user["user_id"],
+        "items": order_items,
+        "subtotal": subtotal,
+        "ongkir": ongkir,
+        "total": total,
+        "status": "menunggu_pembayaran",
+        "alamat": {
+            "nama": user.get("nama"),
+            "wa": user.get("wa"),
+            "alamat": user.get("alamat"),
+            "kota": user.get("kota"),
+            "kode_pos": user.get("kode_pos"),
+        },
+        "kurir": payload.kurir,
+        "catatan": payload.catatan,
+        "bukti_bayar_url": None,
+        "created_at": now,
+        "deleted_at": None,
+    }
+    await db.orders.insert_one(order)
+    return order_public(order)
+
+
+@api_router.get("/orders")
+async def list_orders(user: dict = Depends(get_current_user)):
+    if user.get("role") == "admin":
+        query: dict = {"deleted_at": None}
+    else:
+        query = {"user_id": user["user_id"], "deleted_at": None}
+    docs = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [order_public(d) for d in docs]
+
+
+@api_router.get("/orders/{order_id}")
+async def get_order(order_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.orders.find_one({"id": order_id, "deleted_at": None}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
+    if user.get("role") != "admin" and doc.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    return order_public(doc)
+
+
+@api_router.post("/orders/{order_id}/bukti")
+async def set_bukti_bayar(order_id: str, body: dict, user: dict = Depends(get_current_user)):
+    url = (body or {}).get("bukti_bayar_url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL bukti bayar diperlukan")
+    doc = await db.orders.find_one({"id": order_id, "deleted_at": None})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
+    if user.get("role") != "admin" and doc.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {"bukti_bayar_url": url, "status": "menunggu_konfirmasi"}},
+    )
+    updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    return order_public(updated)
 
 
 # ---------------------------------------------------------------------------
@@ -585,7 +769,8 @@ async def admin_stats(admin: dict = Depends(require_admin)):
     produk = await db.products.count_documents({"deleted_at": None})
     pelanggan = await db.users.count_documents({"role": "buyer", "deleted_at": None})
     pending = await db.users.count_documents({"role": "buyer", "status": "pending", "deleted_at": None})
-    return {"produk": produk, "pelanggan": pelanggan, "pending": pending, "pesanan": 0}
+    pesanan = await db.orders.count_documents({"deleted_at": None})
+    return {"produk": produk, "pelanggan": pelanggan, "pending": pending, "pesanan": pesanan}
 
 
 
@@ -607,6 +792,9 @@ async def on_startup():
     await db.user_sessions.create_index("user_id")
     await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
     await db.products.create_index("id", unique=True)
+    await db.orders.create_index("id", unique=True)
+    await db.orders.create_index("user_id")
+    await db.ongkir_manual.create_index([("kota", 1), ("kurir", 1)])
 
     # Seed store profile with sample data so the app works out of the box.
     if not await db.profil_admin.find_one({}):
@@ -618,13 +806,19 @@ async def on_startup():
                 {"bank": "BCA", "no_rek": "1234567890", "a_n": "Diana"},
             ],
             "whatsapp": DEFAULT_WHATSAPP,
+            "kurir_list": DEFAULT_KURIR,
         })
         logger.info("Seeded profil_admin")
     else:
-        # Ensure the store WhatsApp is set (in international 62 format).
+        # Ensure the store WhatsApp + kurir list are set.
         profil = await db.profil_admin.find_one({})
+        patch = {}
         if not (profil or {}).get("whatsapp"):
-            await db.profil_admin.update_one({}, {"$set": {"whatsapp": DEFAULT_WHATSAPP}})
+            patch["whatsapp"] = DEFAULT_WHATSAPP
+        if not (profil or {}).get("kurir_list"):
+            patch["kurir_list"] = DEFAULT_KURIR
+        if patch:
+            await db.profil_admin.update_one({}, {"$set": patch})
 
     # Seed a default admin whitelist account.
     if not await db.users.find_one({"username": "admin"}):

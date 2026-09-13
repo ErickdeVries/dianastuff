@@ -1,0 +1,36 @@
+{
+  "summary": "Buyer shopping flow (Diana Stuff) tested end-to-end. Backend: 20/20 pytest passed — profil_admin.kurir_list contains ['JNE','J&T','Lion Parcel','Gosend Instan/Sameday']; PUT /api/me validates empty alamat/kota => 400 and persists; GET /api/ongkir returns {found:false,harga:null} with no row and {found:true,harga:15000} after inserting {kota:'Bandung',kurir:'JNE',harga:15000} in Mongo (regex case-insensitive match works); POST /api/orders computes subtotal from product prices, generates no_order matching DS-YYMMDD-XXXX, sets status 'menunggu_pembayaran', decrements stock (5->3 after qty 2), rejects empty cart / missing address / insufficient stock for non-PO, allows PO product to go negative (-3); GET /api/orders scopes to buyer's own orders; GET /api/orders/{id} returns 403 for another buyer; POST /api/orders/{id}/bukti requires url (400), sets bukti_bayar_url and flips status to 'menunggu_konfirmasi', and returns 403 cross-user; POST /api/upload works with buyer bearer token and returns {path,url}. Frontend (390x844, mobile viewport): logged in via injected session_token; /toko renders 2-col grid, 4 chips including chip-Semua, toko-search filters (1 matching card for 'TEST_UI_Shop'), tapping shop-product-<id> opens /produk/[id]; on detail — qty-plus/qty-minus stepper and add-to-cart work, produk-cart badge increments to 2; /keranjang shows cart-subtotal Rp 100.000, cart-plus updates to Rp 150.000; go-checkout → 3-step flow: Step1 address-card shown (buyer already has address 'Jl Mawar No 12, Bandung'), Step2 kurir-JNE + cek-ongkir shows ongkir-msg 'Ongkir belum tersedia untuk kota ini. Admin akan konfirmasi...', Step3 shows rekening-0 (BCA 1234567890 a.n Diana) + summary; place-order navigates to /order/<id> where order-no 'DS-260913-BC12' renders together with upload-bukti + wa-confirm buttons; /pesanan-saya renders the list of buyer orders. No red screens, no console errors, no deprecated Expo packages detected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/checkout Step2", "issues": ["ongkir-msg text begins with a MaterialDesignIcons glyph (\\U000f00cd information-outline) before the message text. Not a bug — icon+Text share the same testID container — but any regex-based assertion on the text should account for the leading glyph."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_buyer_shopping.py",
+    "/app/test_reports/pytest/pytest_buyer_shopping.xml"
+  ],
+  "action_items": [
+    "Optional: add testID to each row in /pesanan-saya (e.g. `order-item-<id>`) so automated tests can iterate rows deterministically. The screen currently renders correctly but exposes no per-row testID.",
+    "Optional: tune the /home shop-button hydration — during the automated run the button took >15s to appear after localStorage token injection + reload; deep-link to /toko worked immediately. May just be first-load bundle warm-up.",
+    "Optional: /api/orders/{id}/bukti currently silently allows re-uploading (idempotent), which is fine. Consider whether admin should be the only one able to change status back after 'menunggu_konfirmasi'."
+  ],
+  "critical_code_review_comments": [
+    "server.py orders endpoint decrements stock BEFORE inserting the order document; if the insert_one ever raises, stock is decremented without a matching order. Wrap in a Mongo transaction or perform inserts-then-decrement inside a try/rollback for robustness.",
+    "POST /api/orders/{id}/bukti accepts an arbitrary `body: dict` untyped — should use a Pydantic model to validate `bukti_bayar_url` shape (currently only tests string truthiness).",
+    "cek_ongkir builds a regex from user input for `kota` without escaping — a malicious kota with regex metacharacters could match unintended documents. Use re.escape() or exact-match with collation.",
+    "server.py still uses deprecated FastAPI @app.on_event('startup')/'shutdown' hooks (already noted in iteration_2)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_buyer_shopping.py"
+  ],
+  "success_rate": {"backend": "100% (20/20)", "frontend": "100% of requested flows"},
+  "seed_data_creation": "During UI test: created + soft-deleted one TEST_UI_Shop product; created one active order for the demo buyer (id ccc12130..., no_order DS-260913-BC12, total Rp 150.000, kurir JNE, ongkir 0, status menunggu_pembayaran). Also seeded a temporary ongkir_manual {kota:'Bandung',kurir:'JNE',harga:15000} row inside test_found_returns_harga and deleted it in the same test. buyer's address left set to 'Jl Mawar No 12, Bandung 40123'. Other TEST_ orders visible in pesanan-saya were left over from previous backend iterations (harmless).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/test_buyer_shopping.py — it is pytest-xdist-safe only when run with -n0 (uses pytest module attrs to hand off ids between tests); the whole file passes 20/20 that way. Frontend token bootstrap trick: login via ctx.post to /api/auth/login-whitelist then set localStorage['diana_session_token'] = JSON.stringify(token) BEFORE first reload — the app hydrates from AsyncStorage on web. testIDs available on product detail: qty-minus/qty-value/qty-plus/add-to-cart/produk-cart/produk-back/produk-nama. testIDs on /pesanan-saya rows are not exposed; use text-content queries or ask main agent to add order-item-<id>.",
+  "rca_of_issue": "N/A — no bugs found."
+}

@@ -21,6 +21,10 @@ export type User = {
   username: string | null;
   role: "admin" | "buyer";
   nama: string | null;
+  wa: string | null;
+  alamat: string | null;
+  kota: string | null;
+  kode_pos: string | null;
   status: string;
   auth_provider: string;
   picture: string | null;

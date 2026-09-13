@@ -57,7 +57,24 @@ export default function HomeScreen() {
             variant="filled"
             onPress={() => router.push("/dashboard")}
           />
-        ) : null}
+        ) : (
+          <>
+            <M3Button
+              testID="shop-button"
+              label="Mulai Belanja"
+              icon="shopping-outline"
+              variant="filled"
+              onPress={() => router.push("/toko")}
+            />
+            <M3Button
+              testID="my-orders-button"
+              label="Pesanan Saya"
+              icon="receipt-text-outline"
+              variant="tonal"
+              onPress={() => router.push("/pesanan-saya")}
+            />
+          </>
+        )}
         <M3Button
           testID="logout-button"
           label="Keluar"

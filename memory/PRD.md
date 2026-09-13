@@ -46,14 +46,21 @@ Inter body. Language: Indonesian.
   actions; Produk (list/search/add/edit/delete, up to 5 photo uploads); Pelanggan (CRUD +
   approve/pending toggle); Pengaturan Toko (nama_toko, logo, banner, rekening_bank[], WA with
   red "Nomor WA wajib diisi" validation); Pesanan & Chat placeholders.
-- Verified by testing agent twice: auth flow (12/12) + admin dashboard (26/26) + frontend flows,
-  no bugs.
+- Buyer shopping (2026-09-13): Etalase /toko (2-col grid, search, category chips, PO badge);
+  Product detail /produk/[id] (photo slider, qty stepper, add to cart); Keranjang /keranjang
+  (qty +/- , remove, subtotal); Checkout 3 langkah /checkout (alamat via PUT /api/me, kurir dari
+  profil_admin.kurir_list + Cek Ongkir dari collection ongkir_manual, pembayaran transfer manual
+  dengan rekening_bank, Total = Subtotal + Ongkir); POST /api/orders membuat orders collection
+  (no_order DS-YYMMDD-XXXX, status menunggu_pembayaran, stok berkurang — bisa_po boleh minus);
+  /pesanan-saya + /order/[id] (upload bukti bayar, konfirmasi via WhatsApp).
+- Verified by testing agent three times: auth (12/12), admin dashboard (26/26), buyer shopping
+  (20/20) — no bugs.
 
 ## Backlog (prioritized)
-- **P1**: Product catalog for buyers (browse products list + detail).
-- **P2**: Cart & orders (`orders`), WhatsApp checkout with bank transfer details.
-- **P2**: In-app chat (`chats`) buyer ↔ admin (currently placeholder).
-- **P2**: Pesanan management screen for admin (currently placeholder).
+- **P1**: Kelola Pesanan untuk admin (update status, input ongkir manual saat "Sedang Dikemas").
+- **P1**: Admin input ongkir_manual dari UI (sekarang lewat DB).
+- **P2**: In-app chat buyer ↔ admin (placeholder saat ini).
+- **P2**: Kurir otomatis (RajaOngkir/dsb) menggantikan ongkir manual.
 
 ## Next Tasks
 1. Admin approval dashboard.

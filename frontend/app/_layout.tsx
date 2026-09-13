@@ -11,6 +11,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/src/components/error-boundary";
 import { AuthProvider, useAuth } from "@/src/context/auth";
+import { CartProvider } from "@/src/context/cart";
 import { queryClient } from "@/src/query-client";
 import { useTheme } from "@/src/theme";
 
@@ -65,8 +66,10 @@ export default function RootLayout() {
           <KeyboardProvider>
             <QueryClientProvider client={queryClient}>
               <AuthProvider>
-                <RootNav />
-                <StatusBar style="dark" />
+                <CartProvider>
+                  <RootNav />
+                  <StatusBar style="dark" />
+                </CartProvider>
               </AuthProvider>
             </QueryClientProvider>
           </KeyboardProvider>
