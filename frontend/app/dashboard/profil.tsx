@@ -8,8 +8,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { apiRequest, ApiError } from "@/src/api/client";
 import { pickAndUploadImages } from "@/src/api/uploads";
+import { ConfirmDialog } from "@/src/components/confirm-dialog";
 import { M3Button } from "@/src/components/m3-button";
 import { M3TextField } from "@/src/components/m3-text-field";
+import { useToast } from "@/src/context/toast";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { resolveImageUrl } from "@/src/utils/image";
 
@@ -27,6 +29,7 @@ export default function ProfilScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
+  const toast = useToast();
 
   const { data } = useQuery<Profil>({
     queryKey: ["profil_admin"],
@@ -42,6 +45,7 @@ export default function ProfilScreen() {
   const [success, setSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState<"logo" | "banner" | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<"logo" | "banner" | null>(null);
 
   useEffect(() => {
     if (data) {
@@ -81,6 +85,37 @@ export default function ProfilScreen() {
 
   const updateRekening = (i: number, field: keyof Rekening, value: string) => {
     setRekening((prev) => prev.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)));
+  };
+
+  // Remove banner/logo without replacing it — persists immediately.
+  const onDeleteImage = async (target: "logo" | "banner") => {
+    setConfirmDelete(null);
+    setError(null);
+    setSuccess(false);
+    setSaving(true);
+    const newLogo = target === "logo" ? null : logo;
+    const newBanner = target === "banner" ? null : banner;
+    try {
+      const cleanRek = rekening.filter((r) => r.bank.trim() || r.no_rek.trim() || r.a_n.trim());
+      await apiRequest("/api/profil_admin", {
+        method: "PUT",
+        body: {
+          nama_toko: namaToko.trim() || data?.nama_toko || "Diana Stuff",
+          logo_url: newLogo,
+          banner_url: newBanner,
+          whatsapp: whatsapp.trim() || data?.whatsapp || "",
+          rekening_bank: cleanRek,
+        },
+      });
+      if (target === "logo") setLogo(null);
+      else setBanner(null);
+      queryClient.invalidateQueries({ queryKey: ["profil_admin"] });
+      toast.show(target === "logo" ? "Logo dihapus" : "Banner dihapus", "success");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Gagal menghapus.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const onSave = async () => {
@@ -129,13 +164,23 @@ export default function ProfilScreen() {
           <Image source={{ uri: resolveImageUrl(banner) }} style={styles.bannerImg} contentFit="cover" />
         ) : null}
         {banner ? (
-          // Banner already set: show a small corner edit chip so the image stays visible.
-          <View style={styles.editChip} testID="edit-banner-chip">
-            <MaterialDesignIcons
-              name={uploading === "banner" ? "loading" : "pencil"}
-              size={16}
-              color={colors.onBrandPrimary}
-            />
+          // Banner already set: small corner actions so the image stays visible.
+          <View style={styles.chipRow}>
+            <Pressable
+              testID="delete-banner"
+              hitSlop={10}
+              onPress={(e) => { e.stopPropagation?.(); setConfirmDelete("banner"); }}
+              style={[styles.editChip, { backgroundColor: colors.error }]}
+            >
+              <MaterialDesignIcons name="trash-can-outline" size={16} color={colors.onError} />
+            </Pressable>
+            <View style={styles.editChip} testID="edit-banner-chip">
+              <MaterialDesignIcons
+                name={uploading === "banner" ? "loading" : "pencil"}
+                size={16}
+                color={colors.onBrandPrimary}
+              />
+            </View>
           </View>
         ) : (
           <View style={styles.bannerOverlay}>
@@ -159,9 +204,23 @@ export default function ProfilScreen() {
             <MaterialDesignIcons name="image-plus" size={26} color={colors.muted} />
           )}
         </Pressable>
-        <Text style={styles.hint}>
-          {uploading === "logo" ? "Mengunggah..." : "Ketuk untuk mengunggah logo (persegi)."}
-        </Text>
+        <View style={{ flex: 1, gap: 8 }}>
+          <M3Button
+            testID="logo-upload-btn"
+            label={uploading === "logo" ? "Mengunggah..." : logo ? "Ubah Logo" : "+ Tambah Logo"}
+            icon={uploading === "logo" ? undefined : "image-plus"}
+            variant="tonal"
+            onPress={() => handleUpload("logo")}
+          />
+          {logo ? (
+            <Pressable testID="delete-logo" hitSlop={10} onPress={() => setConfirmDelete("logo")} style={styles.deleteTextBtn}>
+              <MaterialDesignIcons name="trash-can-outline" size={16} color={colors.error} />
+              <Text style={styles.deleteText}>Hapus Logo</Text>
+            </Pressable>
+          ) : (
+            <Text style={styles.hint}>Logo persegi, ketuk untuk mengunggah.</Text>
+          )}
+        </View>
       </View>
 
       <M3TextField
@@ -228,6 +287,14 @@ export default function ProfilScreen() {
       ) : null}
 
       <M3Button testID="save-profil" label="Simpan Perubahan" variant="filled" loading={saving} onPress={onSave} style={{ marginTop: 8 }} />
+
+      <ConfirmDialog
+        visible={!!confirmDelete}
+        title={confirmDelete === "logo" ? "Hapus Logo" : "Hapus Banner"}
+        message={confirmDelete === "logo" ? "Yakin hapus logo toko? Tampilan kembali tanpa logo." : "Yakin hapus banner toko? Tampilan kembali tanpa banner."}
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={() => confirmDelete && onDeleteImage(confirmDelete)}
+      />
     </KeyboardAwareScrollView>
   );
 }
@@ -246,9 +313,6 @@ const useStyles = makeStyles((colors) => ({
   },
   bannerImg: { ...StyleSheetAbsolute() },
   editChip: {
-    position: "absolute",
-    right: 10,
-    bottom: 10,
     width: 34,
     height: 34,
     borderRadius: 17,
@@ -256,6 +320,15 @@ const useStyles = makeStyles((colors) => ({
     alignItems: "center",
     justifyContent: "center",
   },
+  chipRow: {
+    position: "absolute",
+    right: 10,
+    bottom: 10,
+    flexDirection: "row",
+    gap: 8,
+  },
+  deleteTextBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 8 },
+  deleteText: { fontFamily: fonts.bodyMedium, fontSize: 13, color: colors.error },
   bannerOverlay: {
     flexDirection: "row",
     alignItems: "center",

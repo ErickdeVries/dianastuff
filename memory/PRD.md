@@ -124,6 +124,9 @@ Inter body. Language: Indonesian.
 - App name (app.json expo.name) = "dianastuff".
 - Upload foto Android diperkuat: derive name/ext & mime dari uri (fileName/mimeType sering null di
   Android), Blob hanya untuk web, tidak set Content-Type manual (src/api/uploads.ts).
+- Hapus banner/logo tanpa mengganti: chip trash (banner) + tombol "Hapus Logo" (logo) dengan
+  ConfirmDialog; onDeleteImage PUT /api/profil_admin dengan url null. Tombol upload logo dibuat
+  eksplisit ("+ Tambah Logo"/"Ubah Logo") agar jelas di Android.
 
 
 ## Next Tasks
