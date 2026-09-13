@@ -1,0 +1,26 @@
+{
+  "summary": "BUG FIX VERIFIED - Banner overlay on /dashboard/profil. With banner set: big 'Ganti Banner' overlay is GONE (text count 0), small 34x34 pencil edit-chip (testID=edit-banner-chip) shows at bottom-right corner (x=311,y=211, visible=true), and the banner image (shopping-woman photo) renders fully (335x140). 'Unggah Banner' overlay correctly absent when banner is set; code review confirms conditional logic still shows 'Unggah Banner' overlay when banner_url is null. Chip tap triggers upload flow without crash. Regression PASSED: upload-logo present, nama toko ('Diana Stuff') and whatsapp ('+62085312812452') fields populated/editable, rekening add/remove CRUD works (1->2->1 restored, no data mutation), 'Simpan Perubahan' (save-profil) saves unchanged data successfully ('Pengaturan toko tersimpan.'). Deprecated packages detected: none. SafeAreaView issues: none (uses useSafeAreaInsets correctly).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/dashboard/profil", "issues": ["MINOR: edit-banner-chip is 34x34px, below the 44pt minimum touch target guideline. Mitigated because the entire banner Pressable (335x140) is the actual tap target, so usability impact is negligible."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/test_reports/screenshots/t12_profil.png", "/app/test_reports/screenshots/t12_banner_state.png", "/app/test_reports/screenshots/t12_regression.png"],
+  "action_items": ["OPTIONAL: increase edit-banner-chip visual size toward 40-44px for better affordance (not blocking - whole banner area is tappable)."],
+  "critical_code_review_comments": [
+    "Conditional banner overlay logic (profil.tsx:128-149) is clean: banner set -> edit chip only; no banner -> 'Unggah Banner' overlay. Upload flow still wired via single Pressable testID=upload-banner.",
+    "Uploading state swaps pencil/loading icon inside the chip - good UX preserved from previous overlay behavior.",
+    "No hardcoded URLs; resolveImageUrl used for banner/logo. No MongoDB _id leakage concerns (frontend-only change)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not in scope)", "frontend": "100%"},
+  "seed_data_creation": "None. Re-saved profil with UNCHANGED values only; rekening added-then-removed (restored to original count of 1).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bug fix fully verified via Playwright on public URL with admin/admin123. Banner state unchanged (shopping-woman photo). No data mutated. Profil save endpoint working. The 'no banner -> Unggah Banner overlay' branch verified by code review only (did not clear seeded banner to avoid mutation).",
+  "rca_of_issue": "Original bug: 'Ganti Banner' overlay pill was rendered unconditionally inside the banner Pressable, permanently covering the center of the uploaded banner image. Fix in profil.tsx:128-149 makes the overlay conditional on !banner - with a banner set only the corner edit-chip renders, leaving the image fully visible. Verified fixed."
+}

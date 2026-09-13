@@ -128,14 +128,25 @@ export default function ProfilScreen() {
         {banner ? (
           <Image source={{ uri: resolveImageUrl(banner) }} style={styles.bannerImg} contentFit="cover" />
         ) : null}
-        <View style={styles.bannerOverlay}>
-          <MaterialDesignIcons
-            name={uploading === "banner" ? "loading" : "image-plus"}
-            size={26}
-            color={colors.onBrandPrimary}
-          />
-          <Text style={styles.overlayText}>{banner ? "Ganti Banner" : "Unggah Banner"}</Text>
-        </View>
+        {banner ? (
+          // Banner already set: show a small corner edit chip so the image stays visible.
+          <View style={styles.editChip} testID="edit-banner-chip">
+            <MaterialDesignIcons
+              name={uploading === "banner" ? "loading" : "pencil"}
+              size={16}
+              color={colors.onBrandPrimary}
+            />
+          </View>
+        ) : (
+          <View style={styles.bannerOverlay}>
+            <MaterialDesignIcons
+              name={uploading === "banner" ? "loading" : "image-plus"}
+              size={26}
+              color={colors.onBrandPrimary}
+            />
+            <Text style={styles.overlayText}>Unggah Banner</Text>
+          </View>
+        )}
       </Pressable>
 
       {/* Logo uploader */}
@@ -234,6 +245,17 @@ const useStyles = makeStyles((colors) => ({
     alignItems: "center",
   },
   bannerImg: { ...StyleSheetAbsolute() },
+  editChip: {
+    position: "absolute",
+    right: 10,
+    bottom: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.brandPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   bannerOverlay: {
     flexDirection: "row",
     alignItems: "center",
