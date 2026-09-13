@@ -2,7 +2,7 @@ import MaterialDesignIcons from "@react-native-vector-icons/material-design-icon
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { useState } from "react";
-import { FlatList, Modal, Pressable, RefreshControl, Text, TextInput, View } from "react-native";
+import { FlatList, Modal, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { apiRequest } from "@/src/api/client";
@@ -35,6 +35,15 @@ export default function AdminPesananScreen() {
 
   const [resiMap, setResiMap] = useState<Record<string, string>>({});
   const [viewBukti, setViewBukti] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string>("semua");
+
+  const FILTERS: { key: string; label: string }[] = [
+    { key: "semua", label: "Semua" },
+    { key: "menunggu_konfirmasi", label: "Perlu Konfirmasi" },
+    { key: "sedang_dikemas", label: "Dikemas" },
+    { key: "dikirim", label: "Dikirim" },
+    { key: "selesai", label: "Selesai" },
+  ];
 
   const { data, isLoading, refetch, isRefetching } = useQuery<Order[]>({
     queryKey: ["orders", "admin"],
@@ -74,7 +83,17 @@ export default function AdminPesananScreen() {
         {item.no_resi ? <Text style={styles.meta}>Resi ({item.kurir}): {item.no_resi}</Text> : null}
 
         {/* Contextual actions */}
-        {(item.status === "menunggu_pembayaran" || item.status === "menunggu_konfirmasi") ? (
+        {item.status === "menunggu_konfirmasi" ? (
+          <M3Button
+            testID={`konfirmasi-${item.id}`}
+            label="Konfirmasi Pembayaran Diterima"
+            icon="cash-check"
+            variant="filled"
+            onPress={() => statusMut.mutate({ id: item.id, status: "sedang_dikemas" })}
+          />
+        ) : null}
+
+        {item.status === "menunggu_pembayaran" ? (
           <M3Button
             testID={`proses-${item.id}`}
             label="Proses → Sedang Dikemas"
@@ -109,13 +128,34 @@ export default function AdminPesananScreen() {
         ) : null}
 
         {item.status === "dikirim" ? (
-          <M3Button
-            testID={`selesai-${item.id}`}
-            label="Tandai Selesai"
-            icon="check-circle-outline"
-            variant="tonal"
-            onPress={() => statusMut.mutate({ id: item.id, status: "selesai" })}
-          />
+          <View style={{ gap: 8 }}>
+            <TextInput
+              testID={`resi-edit-${item.id}`}
+              style={styles.resiInput}
+              placeholder="No. Resi"
+              placeholderTextColor={colors.muted}
+              value={resiMap[item.id] ?? item.no_resi ?? ""}
+              onChangeText={(v) => setResiMap((m) => ({ ...m, [item.id]: v }))}
+            />
+            <M3Button
+              testID={`update-resi-${item.id}`}
+              label="Update Resi / Tracking"
+              icon="truck-delivery-outline"
+              variant="tonal"
+              onPress={() => {
+                const resi = (resiMap[item.id] ?? item.no_resi ?? "").trim();
+                if (!resi) { toast.show("Isi No. Resi dulu", "error"); return; }
+                statusMut.mutate({ id: item.id, status: "dikirim", no_resi: resi });
+              }}
+            />
+            <M3Button
+              testID={`selesai-${item.id}`}
+              label="Tandai Selesai"
+              icon="check-circle-outline"
+              variant="filled"
+              onPress={() => statusMut.mutate({ id: item.id, status: "selesai" })}
+            />
+          </View>
         ) : null}
       </View>
     );
@@ -123,8 +163,26 @@ export default function AdminPesananScreen() {
 
   return (
     <View style={styles.root}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterBar}
+        contentContainerStyle={{ gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}
+      >
+        {FILTERS.map((f) => (
+          <Pressable
+            key={f.key}
+            testID={`filter-${f.key}`}
+            onPress={() => setFilter(f.key)}
+            style={[styles.chip, filter === f.key && styles.chipActive]}
+          >
+            <Text style={[styles.chipText, filter === f.key && styles.chipTextActive]}>{f.label}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
       <FlatList
-        data={data ?? []}
+        data={(data ?? []).filter((o) => filter === "semua" || o.status === filter)}
         keyExtractor={(o) => o.id}
         renderItem={renderItem}
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 24 }}
@@ -150,6 +208,16 @@ export default function AdminPesananScreen() {
 
 const useStyles = makeStyles((colors) => ({
   root: { flex: 1, backgroundColor: colors.surface },
+  filterBar: { flexGrow: 0 },
+  chip: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  chipActive: { backgroundColor: colors.brandPrimary },
+  chipText: { fontFamily: fonts.bodyMedium, fontSize: 13, color: colors.onSurfaceTertiary },
+  chipTextActive: { color: colors.onBrandPrimary },
   card: { backgroundColor: colors.surfaceSecondary, borderRadius: 18, padding: 16, gap: 8 },
   rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   noOrder: { fontFamily: fonts.heading, fontSize: 15, color: colors.onSurface },

@@ -7,6 +7,7 @@ import { FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-na
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { apiRequest } from "@/src/api/client";
+import { useAuth } from "@/src/context/auth";
 import { useCart } from "@/src/context/cart";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { formatRupiah } from "@/src/utils/format";
@@ -28,6 +29,14 @@ export default function TokoScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { count } = useCart();
+  const { user } = useAuth();
+
+  const { data: unreadChat } = useQuery<{ count: number }>({
+    queryKey: ["chat", "unread"],
+    queryFn: () => apiRequest<{ count: number }>("/api/chat/unread"),
+    enabled: !!user,
+  });
+  const chatBadge = unreadChat?.count ?? 0;
 
   const [search, setSearch] = useState("");
   const [kategori, setKategori] = useState<string>("Semua");
@@ -76,18 +85,35 @@ export default function TokoScreen() {
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Pressable testID="toko-back" onPress={() => router.back()} hitSlop={10} style={styles.headerBtn}>
-          <MaterialDesignIcons name="arrow-left" size={24} color={colors.onSurface} />
-        </Pressable>
+        {router.canGoBack() ? (
+          <Pressable testID="toko-back" onPress={() => router.back()} hitSlop={10} style={styles.headerBtn}>
+            <MaterialDesignIcons name="arrow-left" size={24} color={colors.onSurface} />
+          </Pressable>
+        ) : (
+          <View style={styles.headerBtn} />
+        )}
         <Text style={styles.headerTitle}>Etalase Toko</Text>
-        <Pressable testID="toko-cart" onPress={() => router.push("/keranjang")} hitSlop={10} style={styles.headerBtn}>
-          <MaterialDesignIcons name="cart-outline" size={24} color={colors.onSurface} />
-          {count > 0 ? (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{count}</Text>
-            </View>
-          ) : null}
-        </Pressable>
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <Pressable testID="toko-chat" onPress={() => router.push("/chat")} hitSlop={10} style={styles.headerBtn}>
+            <MaterialDesignIcons name="chat-outline" size={24} color={colors.onSurface} />
+            {chatBadge > 0 ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{chatBadge}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+          <Pressable testID="toko-cart" onPress={() => router.push("/keranjang")} hitSlop={10} style={styles.headerBtn}>
+            <MaterialDesignIcons name="cart-outline" size={24} color={colors.onSurface} />
+            {count > 0 ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{count}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+          <Pressable testID="toko-account" onPress={() => router.push(user ? "/home" : "/login")} hitSlop={10} style={styles.headerBtn}>
+            <MaterialDesignIcons name="account-circle-outline" size={24} color={colors.onSurface} />
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.searchWrap}>

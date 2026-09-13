@@ -12,6 +12,7 @@ type Stats = {
   pelanggan: number;
   pending: number;
   pesanan: number;
+  perlu_konfirmasi: number;
   penjualan_hari_ini: number;
   penjualan_bulan_ini: number;
 };
@@ -32,6 +33,14 @@ export default function DashboardHome() {
     queryFn: () => apiRequest<Stats>("/api/admin/stats"),
   });
 
+  // Live-updated by the global NotificationListener via socket events.
+  const { data: unreadChat } = useQuery<{ count: number }>({
+    queryKey: ["chat", "unread"],
+    queryFn: () => apiRequest<{ count: number }>("/api/chat/unread"),
+  });
+  const chatBaru = unreadChat?.count ?? 0;
+  const perluKonfirmasi = data?.perlu_konfirmasi ?? 0;
+
   const cards = [
     { label: "Produk", value: data?.produk ?? 0, icon: "tag-outline", color: colors.brandPrimary },
     { label: "Pelanggan", value: data?.pelanggan ?? 0, icon: "account-group-outline", color: colors.info },
@@ -41,6 +50,46 @@ export default function DashboardHome() {
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+      {chatBaru > 0 || perluKonfirmasi > 0 ? (
+        <>
+          <Text style={styles.heading}>Notifikasi</Text>
+          <View style={{ gap: 12 }}>
+            {chatBaru > 0 ? (
+              <Pressable
+                testID="notif-chat-baru"
+                style={styles.notifCard}
+                onPress={() => router.push("/dashboard/chat")}
+              >
+                <View style={[styles.notifIcon, { backgroundColor: colors.brandPrimary }]}>
+                  <MaterialDesignIcons name="chat-alert-outline" size={22} color={colors.onBrandPrimary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.notifTitle}>Chat Baru</Text>
+                  <Text style={styles.notifSub}>{chatBaru} pesan belum dibaca</Text>
+                </View>
+                <MaterialDesignIcons name="chevron-right" size={22} color={colors.muted} />
+              </Pressable>
+            ) : null}
+            {perluKonfirmasi > 0 ? (
+              <Pressable
+                testID="notif-pesanan-baru"
+                style={styles.notifCard}
+                onPress={() => router.push("/dashboard/pesanan")}
+              >
+                <View style={[styles.notifIcon, { backgroundColor: colors.warning }]}>
+                  <MaterialDesignIcons name="receipt-text-clock-outline" size={22} color={colors.onWarning} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.notifTitle}>Pesanan Perlu Konfirmasi</Text>
+                  <Text style={styles.notifSub}>{perluKonfirmasi} pesanan menunggu konfirmasi pembayaran</Text>
+                </View>
+                <MaterialDesignIcons name="chevron-right" size={22} color={colors.muted} />
+              </Pressable>
+            ) : null}
+          </View>
+        </>
+      ) : null}
+
       <Text style={styles.heading}>Ringkasan Penjualan</Text>
       <View style={styles.grid}>
         <View style={styles.statCard} testID="stat-penjualan-hari-ini">
@@ -101,6 +150,34 @@ const useStyles = makeStyles((colors) => ({
     fontSize: 18,
     color: colors.onSurface,
     marginTop: 4,
+  },
+  notifCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: colors.brandPrimary,
+  },
+  notifIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  notifTitle: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 15,
+    color: colors.onSurface,
+  },
+  notifSub: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.muted,
+    marginTop: 2,
   },
   grid: {
     flexDirection: "row",

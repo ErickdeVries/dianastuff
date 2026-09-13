@@ -69,13 +69,15 @@ export default function ChatScreen() {
     if (!room) return;
     let active = true;
     let socketRef: any = null;
+    let doJoin: (() => void) | null = null;
+    let onMessage: ((msg: Message) => void) | null = null;
     (async () => {
       const socket = await connectSocket();
       socketRef = socket;
-      const doJoin = () => socket.emit("join", { room });
+      doJoin = () => socket.emit("join", { room });
       if (socket.connected) doJoin();
       socket.on("connect", doJoin);
-      const onMessage = (msg: Message) => {
+      onMessage = (msg: Message) => {
         if (!active || msg.room !== room) return;
         setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
         if (msg.sender_id !== user?.user_id) markRead();
@@ -85,8 +87,10 @@ export default function ChatScreen() {
     return () => {
       active = false;
       if (socketRef) {
-        socketRef.off("message");
-        socketRef.off("connect");
+        // Remove only this screen's listeners — the shared socket is also
+        // used by other screens (e.g. the admin room list).
+        if (onMessage) socketRef.off("message", onMessage);
+        if (doJoin) socketRef.off("connect", doJoin);
       }
     };
   }, [room]);

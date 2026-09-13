@@ -1,9 +1,11 @@
 import MaterialDesignIcons from "@react-native-vector-icons/material-design-icons";
+import { useQuery } from "@tanstack/react-query";
 import { Redirect, useRouter } from "expo-router";
 import { Drawer } from "expo-router/drawer";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { apiRequest } from "@/src/api/client";
 import { useAuth } from "@/src/context/auth";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 
@@ -26,6 +28,19 @@ function DrawerContent(props: any) {
   const { user, logout } = useAuth();
   const router = useRouter();
   const activeIndex = props.state.index;
+
+  const { data: unreadChat } = useQuery<{ count: number }>({
+    queryKey: ["chat", "unread"],
+    queryFn: () => apiRequest<{ count: number }>("/api/chat/unread"),
+  });
+  const { data: stats } = useQuery<{ perlu_konfirmasi: number }>({
+    queryKey: ["admin", "stats"],
+    queryFn: () => apiRequest<{ perlu_konfirmasi: number }>("/api/admin/stats"),
+  });
+  const badges: Record<string, number> = {
+    chat: unreadChat?.count ?? 0,
+    pesanan: stats?.perlu_konfirmasi ?? 0,
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surfaceSecondary }}>
@@ -55,6 +70,11 @@ function DrawerContent(props: any) {
                 color={focused ? colors.onBrandPrimary : colors.onSurfaceTertiary}
               />
               <Text style={[styles.itemText, focused && styles.itemTextActive]}>{item.label}</Text>
+              {(badges[item.name] ?? 0) > 0 ? (
+                <View style={styles.badge} testID={`drawer-badge-${item.name}`}>
+                  <Text style={styles.badgeText}>{badges[item.name]}</Text>
+                </View>
+              ) : null}
             </Pressable>
           );
         })}
@@ -160,6 +180,21 @@ const useStyles = makeStyles((colors) => ({
     fontFamily: fonts.bodyMedium,
     fontSize: 15,
     color: colors.onSurfaceTertiary,
+    flex: 1,
+  },
+  badge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.error,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+  },
+  badgeText: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 11,
+    color: colors.onError,
   },
   itemTextActive: {
     color: colors.onBrandPrimary,

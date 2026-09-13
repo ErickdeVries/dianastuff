@@ -11,7 +11,7 @@ import * as WebBrowser from "expo-web-browser";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 
-import { apiRequest, clearToken, getToken, persistToken, setMemToken } from "@/src/api/client";
+import { apiRequest, ApiError, clearToken, getToken, persistToken, setMemToken } from "@/src/api/client";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -82,9 +82,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const me = await apiRequest<User>("/api/auth/me");
       setUser(me);
-    } catch {
-      await clearToken();
-      setMemToken(null);
+    } catch (e) {
+      // Only a real 401 means the session is gone. Network hiccups (flaky
+      // mobile data, backend restart) must NOT wipe the stored token —
+      // otherwise users get logged out every time the connection drops.
+      if (e instanceof ApiError && e.status === 401) {
+        await clearToken();
+        setMemToken(null);
+      }
       setUser(null);
     }
   }, []);

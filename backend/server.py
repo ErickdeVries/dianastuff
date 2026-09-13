@@ -813,6 +813,7 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
         "deleted_at": None,
     }
     await db.orders.insert_one(order)
+    await sio.emit("new_order", order_public(order), room="admins")
     return order_public(order)
 
 
@@ -888,8 +889,19 @@ async def update_order_status(order_id: str, body: dict, admin: dict = Depends(r
         ongkir = max(0.0, float(body["ongkir"]))
         update["ongkir"] = ongkir
         update["total"] = doc.get("subtotal", 0) + ongkir
-    await db.orders.update_one({"id": order_id}, {"$set": update, "$push": {"status_history": {"status": status, "at": datetime.now(timezone.utc)}}})
+    # Only record history when the status actually changes (e.g. a resi-only
+    # update on an already-dikirim order must not add a duplicate entry).
+    ops: dict = {"$set": update}
+    if status != doc.get("status"):
+        ops["$push"] = {"status_history": {"status": status, "at": datetime.now(timezone.utc)}}
+    await db.orders.update_one({"id": order_id}, ops)
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    # Notify the buyer in realtime about status/tracking changes.
+    await sio.emit(
+        "order_status",
+        {"id": updated.get("id"), "no_order": updated.get("no_order"), "status": updated.get("status"), "no_resi": updated.get("no_resi")},
+        room=updated.get("user_id"),
+    )
     return order_public(updated)
 
 
@@ -1006,7 +1018,7 @@ async def chat_send(body: dict, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Pesan kosong")
     doc = await save_chat_message(room, user, text, image_url)
     payload = chat_public(doc)
-    await sio.emit("message", payload, room=room)
+    await sio.emit("message", payload, room=[room, "admins"])
     return payload
 
 
@@ -1021,6 +1033,7 @@ async def admin_stats(admin: dict = Depends(require_admin)):
     pelanggan = await db.users.count_documents({"role": "buyer", "deleted_at": None})
     pending = await db.users.count_documents({"role": "buyer", "status": "pending", "deleted_at": None})
     pesanan = await db.orders.count_documents({"deleted_at": None})
+    perlu_konfirmasi = await db.orders.count_documents({"deleted_at": None, "status": "menunggu_konfirmasi"})
 
     # Sales totals (paid orders only) in WIB day/month boundaries.
     wib = timezone(timedelta(hours=7))
@@ -1046,6 +1059,7 @@ async def admin_stats(admin: dict = Depends(require_admin)):
         "pelanggan": pelanggan,
         "pending": pending,
         "pesanan": pesanan,
+        "perlu_konfirmasi": perlu_konfirmasi,
         "penjualan_hari_ini": await sum_sales(start_today),
         "penjualan_bulan_ini": await sum_sales(start_month),
     }
@@ -1244,6 +1258,11 @@ async def connect(sid, environ, auth):
         "nama": user.get("nama") or user.get("username"),
         "username": user.get("username"),
     })
+    # Everyone joins their own room so they receive chat + order events;
+    # admins additionally join the broadcast room.
+    await sio.enter_room(sid, user["user_id"])
+    if user.get("role") == "admin":
+        await sio.enter_room(sid, "admins")
     return True
 
 
@@ -1267,7 +1286,7 @@ async def message(sid, data):
     if not text and not image_url:
         return
     doc = await save_chat_message(room, session, text, image_url)
-    await sio.emit("message", chat_public(doc), room=room)
+    await sio.emit("message", chat_public(doc), room=[room, "admins"])
 
 
 # Wrap FastAPI with Socket.IO. Uvicorn serves this combined `app`.

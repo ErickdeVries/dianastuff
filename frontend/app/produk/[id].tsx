@@ -7,8 +7,8 @@ import { Dimensions, FlatList, Pressable, ScrollView, Text, View } from "react-n
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { apiRequest } from "@/src/api/client";
-import { M3Button } from "@/src/components/m3-button";
 import { useCart } from "@/src/context/cart";
+import { useToast } from "@/src/context/toast";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { formatRupiah } from "@/src/utils/format";
 import { resolveImageUrl } from "@/src/utils/image";
@@ -34,6 +34,7 @@ export default function ProductDetail() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { addItem, count } = useCart();
+  const toast = useToast();
 
   const [activePhoto, setActivePhoto] = useState(0);
   const [qty, setQty] = useState(1);
@@ -61,7 +62,14 @@ export default function ProductDetail() {
       qty,
     );
     setAdded(true);
+    toast.show("Ditambahkan ke keranjang", "success");
     setTimeout(() => setAdded(false), 1500);
+  };
+
+  const onBuyNow = () => {
+    if (!product || !available) return;
+    onAdd();
+    router.push("/checkout");
   };
 
   return (
@@ -130,6 +138,18 @@ export default function ProductDetail() {
                   </View>
                 ) : null}
               </View>
+              <View style={styles.qtyRow}>
+                <Text style={styles.qtyLabel}>Jumlah</Text>
+                <View style={styles.stepper}>
+                  <Pressable testID="qty-minus" onPress={() => setQty((q) => Math.max(1, q - 1))} style={styles.stepBtn}>
+                    <MaterialDesignIcons name="minus" size={18} color={colors.onSurface} />
+                  </Pressable>
+                  <Text style={styles.qtyText} testID="qty-value">{qty}</Text>
+                  <Pressable testID="qty-plus" onPress={() => setQty((q) => q + 1)} style={styles.stepBtn}>
+                    <MaterialDesignIcons name="plus" size={18} color={colors.onSurface} />
+                  </Pressable>
+                </View>
+              </View>
               {product.deskripsi ? (
                 <>
                   <Text style={styles.sectionTitle}>Deskripsi</Text>
@@ -145,25 +165,30 @@ export default function ProductDetail() {
 
       {product ? (
         <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
-          <View style={styles.stepper}>
-            <Pressable testID="qty-minus" onPress={() => setQty((q) => Math.max(1, q - 1))} style={styles.stepBtn}>
-              <MaterialDesignIcons name="minus" size={18} color={colors.onSurface} />
+          {/* Shopee-style action bar: chat | keranjang | beli sekarang */}
+          <View style={styles.footerIcons}>
+            <Pressable testID="footer-chat" onPress={() => router.push("/chat")} style={styles.footerIconBtn}>
+              <MaterialDesignIcons name="chat-outline" size={24} color={colors.brandPrimary} />
             </Pressable>
-            <Text style={styles.qtyText} testID="qty-value">{qty}</Text>
-            <Pressable testID="qty-plus" onPress={() => setQty((q) => q + 1)} style={styles.stepBtn}>
-              <MaterialDesignIcons name="plus" size={18} color={colors.onSurface} />
+            <View style={styles.footerDivider} />
+            <Pressable testID="footer-cart" onPress={onAdd} disabled={!available} style={styles.footerIconBtn}>
+              <MaterialDesignIcons name={added ? "check" : "cart-plus"} size={24} color={colors.brandPrimary} />
+              {count > 0 ? (
+                <View style={styles.badge}><Text style={styles.badgeText}>{count}</Text></View>
+              ) : null}
             </Pressable>
           </View>
-          <View style={{ flex: 1 }}>
-            <M3Button
-              testID="add-to-cart"
-              label={added ? "Ditambahkan ✓" : available ? "Tambah ke Keranjang" : "Stok Habis"}
-              icon={added ? undefined : "cart-plus"}
-              variant="filled"
-              disabled={!available}
-              onPress={onAdd}
-            />
-          </View>
+          <Pressable
+            testID="beli-sekarang"
+            disabled={!available}
+            onPress={onBuyNow}
+            style={[styles.buyBtn, !available && { opacity: 0.5 }]}
+          >
+            <Text style={styles.buyBtnLabel}>{available ? "Beli Sekarang" : "Stok Habis"}</Text>
+            {available ? (
+              <Text style={styles.buyBtnPrice}>{formatRupiah(product.harga * qty)}</Text>
+            ) : null}
+          </Pressable>
         </View>
       ) : null}
     </View>
@@ -239,12 +264,43 @@ const useStyles = makeStyles((colors) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingTop: 12,
     backgroundColor: colors.surfaceSecondary,
     borderTopWidth: 1,
     borderTopColor: colors.divider,
   },
+  footerIcons: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.brandTertiary,
+    borderRadius: 16,
+  },
+  footerIconBtn: {
+    width: 52,
+    height: 52,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  footerDivider: { width: 1, height: 26, backgroundColor: colors.divider },
+  buyBtn: {
+    flex: 1,
+    backgroundColor: colors.brandPrimary,
+    borderRadius: 16,
+    paddingVertical: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 52,
+  },
+  buyBtnLabel: { fontFamily: fonts.heading, fontSize: 16, color: colors.onBrandPrimary },
+  buyBtnPrice: { fontFamily: fonts.body, fontSize: 12, color: colors.onBrandPrimary, opacity: 0.9 },
+  qtyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 8,
+  },
+  qtyLabel: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onSurfaceTertiary },
   stepper: {
     flexDirection: "row",
     alignItems: "center",
@@ -253,6 +309,6 @@ const useStyles = makeStyles((colors) => ({
     padding: 4,
     gap: 4,
   },
-  stepBtn: { width: 38, height: 38, alignItems: "center", justifyContent: "center", borderRadius: 999 },
+  stepBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 999 },
   qtyText: { fontFamily: fonts.bodyMedium, fontSize: 16, color: colors.onSurface, minWidth: 24, textAlign: "center" },
 }));

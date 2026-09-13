@@ -1,0 +1,40 @@
+{
+  "summary": "SHOPEE-STYLE UX REDIRECT + ACTION BAR FULLY VERIFIED (frontend, ~45 checks, 100% pass). (1) Auth gate: buyer whitelist login (buyer/buyer123) via real UI lands directly on /toko; root '/' as logged-in buyer also routes to /toko (covers Google OAuth return path since gate keys off segments, not entry route); admin login (admin/admin123) still lands on /home with dashboard button and NO buyer shop-button. Logout -> /login; logged-out /home redirects to /login. (2) Toko header: toko-chat, toko-cart (badge), toko-account all render; back button correctly ABSENT on fresh load/login (router.replace, no history) and PRESENT after push navigation (home -> /toko). Guest toko-account -> /login; buyer toko-account -> /home; toko-chat -> /chat; toko-cart -> /keranjang. (3) Product detail Shopee bar: footer-chat (52x52), footer-cart (52x52, cart-plus icon), big Beli Sekarang (234x56) with live price harga*qty — qty stepper (qty-minus/qty-value/qty-plus) in info area updated price Rp 89.000 -> Rp 178.000 at qty 2 and Rp 15.000 -> Rp 30.000 on another product. footer-cart fires toast 'Ditambahkan ke keranjang' and header cart badge -> 2. beli-sekarang adds to cart + routes /checkout. (4) Guest gating: /toko and /produk/[id] browsable without login; guest footer-chat -> /login; guest beli-sekarang -> /login; guest footer-cart adds locally with toast (cart is local storage — per spec only chat/beli-sekarang must gate). (5) Regression: full checkout E2E as buyer — address card pre-filled, kurir JNE selected, cek-ongkir Rp 15.000, place-order 'Buat Pesanan · Rp 352.000' -> order DS-260913-E2F3 created (Menunggu Pembayaran), cart cleared; /keranjang shows items with qty steppers + subtotal; /home buyer buttons (shop-button, my-orders-button, chat-button, logout-button) all navigate; /pesanan-saya and /chat load. No red screens, no app console errors (only benign noise: guest 401 on /api/auth/me, Cloudflare rum, aborted asset loads on navigation).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/produk/[id]", "issues": ["Qty stepper buttons (qty-minus/qty-plus) are 38x38px — slightly under the 44pt minimum touch target guideline (footer icons 52x52 and beli-sekarang 234x56 are compliant). Minor; consider bumping stepBtn to 40-44px."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/screenshots/iter8_guest_login_gate.png",
+    "/app/test_reports/screenshots/iter8_buyer_toko.png",
+    "/app/test_reports/screenshots/iter8_buyer_home_regression.png",
+    "/app/test_reports/screenshots/iter8_keranjang.png",
+    "/app/test_reports/screenshots/iter8_order_success.png",
+    "/app/test_reports/screenshots/iter8_produk_shopee_bar.png",
+    "/app/test_reports/screenshots/iter8_admin_logout_flow.png"
+  ],
+  "action_items": [
+    "Optional: bump qty stepBtn from 38x38 to >=44px on /produk/[id] for touch-target compliance.",
+    "Optional cleanup: leftover TEST products (TEST_Notif, TEST_SessOrders) are visible on the public storefront — delete or hide them before production.",
+    "No blocking issues — all requested flows pass."
+  ],
+  "critical_code_review_comments": [
+    "_layout.tsx RootNav: public group (toko/produk/webview) + auth redirect (buyer->/toko, admin->/home) verified live for fresh load, post-login, root '/', and post-logout. Gate is segment-based so Google OAuth landing on '/' routes buyers to /toko without any extra screen.",
+    "produk/[id].tsx onBuyNow reuses onAdd (adds qty to cart, toast) then router.push('/checkout') — verified cart contents merged correctly in checkout (Blouse 2x + Dress 1x = Rp 337.000 subtotal + Rp 15.000 ongkir = Rp 352.000 on place-order label).",
+    "toko.tsx back button uses router.canGoBack() — verified hidden on fresh load and after login replace, visible after push. Chat badge only queries /api/chat/unread when user exists (guest safe).",
+    "No deprecated Expo packages found in reviewed files (no expo-av / expo-barcode-scanner / expo-background-fetch). M3Button import correctly removed from produk page.",
+    "Cart context persists to local storage and clears after order creation — verified badge/subtotal reset post-checkout."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only round; /api/products, login-whitelist, orders, ongkir all exercised via UI — 200s)", "frontend": "100% (~45 checks across 5 Playwright scripts)"},
+  "seed_data_creation": "Test order created via UI checkout: DS-260913-E2F3 (buyer 'Pembeli Demo', Blouse Katun Premium x2 + Dress Floral Musim Panas x1, JNE, Rp 352.000, status menunggu_pembayaran, id cf81848389514f07bcda2640535ab3fd). Buyer cart was auto-cleared by checkout. LocalStorage carts from guest/buyer sessions are browser-local (not persisted server-side).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Buyer login button flow: [data-testid='tab-whitelist'] then fill '[data-testid=\"username-input\"] input' / '[data-testid=\"password-input\"] input' (M3TextField containerTestID wraps inner input) then whitelist-login-button. Toast element [data-testid='toast'] shows ~2.8s. Cart badge text is inside [data-testid='produk-cart'|'toko-cart'] textContent (icon glyph chars included, just match digits). Fresh browser sessions start with EMPTY cart (localStorage). Guest /api/auth/me 401 in console is expected noise, as are cdn-cgi/rum and aborted asset ERR_ABORTED on navigation. Storefront still contains TEST_Notif/TEST_SessOrders seed products — don't treat as regression. NOTE: .env uses EXPO_PUBLIC_BACKEND_URL (not EXPO_BACKEND_URL) as API base in src/api/client.ts.",
+  "rca_of_issue": ""
+}

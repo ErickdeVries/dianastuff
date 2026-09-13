@@ -10,6 +10,7 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/src/components/error-boundary";
+import { NotificationListener } from "@/src/components/notification-listener";
 import { AuthProvider, useAuth } from "@/src/context/auth";
 import { CartProvider } from "@/src/context/cart";
 import { ToastProvider } from "@/src/context/toast";
@@ -42,7 +43,8 @@ function RootNav() {
       router.replace("/login");
     } else if (user && (inAuthGroup || !root)) {
       // After a Google OAuth redirect the user lands back on "/" — route them in.
-      router.replace("/home");
+      // Buyers go straight to the storefront; admins to their home screen.
+      router.replace(user.role === "admin" ? "/home" : "/toko");
     }
   }, [user, loading, segments, router]);
 
@@ -73,6 +75,7 @@ export default function RootLayout() {
               <AuthProvider>
                 <CartProvider>
                   <ToastProvider>
+                    <NotificationListener />
                     <RootNav />
                     <StatusBar style="dark" />
                   </ToastProvider>

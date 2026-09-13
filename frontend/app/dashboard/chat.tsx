@@ -1,10 +1,11 @@
 import MaterialDesignIcons from "@react-native-vector-icons/material-design-icons";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 
 import { apiRequest } from "@/src/api/client";
+import { connectSocket } from "@/src/lib/socket";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 
 type Room = { room: string; nama: string; last_text: string; last_at: string | null; unread: number };
@@ -13,6 +14,7 @@ export default function AdminChatScreen() {
   const styles = useStyles();
   const { colors } = useTheme();
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const { data, refetch } = useQuery<Room[]>({
     queryKey: ["chat", "rooms"],
@@ -20,6 +22,24 @@ export default function AdminChatScreen() {
   });
 
   useFocusEffect(useCallback(() => { refetch(); }, [refetch]));
+
+  // Realtime: refresh the room list + unread badge on any incoming message.
+  useEffect(() => {
+    let socketRef: any = null;
+    let onMsg: ((...args: any[]) => void) | null = null;
+    (async () => {
+      const socket = await connectSocket();
+      socketRef = socket;
+      onMsg = () => {
+        queryClient.invalidateQueries({ queryKey: ["chat", "rooms"] });
+        queryClient.invalidateQueries({ queryKey: ["chat", "unread"] });
+      };
+      socket.on("message", onMsg);
+    })();
+    return () => {
+      if (socketRef && onMsg) socketRef.off("message", onMsg);
+    };
+  }, [queryClient]);
 
   const renderItem = ({ item }: { item: Room }) => (
     <Pressable

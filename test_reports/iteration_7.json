@@ -1,0 +1,36 @@
+{
+  "summary": "REALTIME NOTIFICATION LAYER FULLY VERIFIED (both). Backend: 9/9 pytest passed in test_notifications_realtime.py — POST /api/orders emits 'new_order' to 'admins' room (buyer does NOT receive it); PUT /api/orders/<id>/status emits 'order_status' {id,no_order,status,no_resi} to the buyer's user_id room (admin room does NOT receive it), including resi-only updates on an already-dikirim order; GET /api/admin/stats returns integer perlu_konfirmasi that counts only menunggu_konfirmasi orders (verified +1 after bukti upload, unchanged for menunggu_pembayaran; buyer gets 401/403). Frontend E2E with TWO concurrent browser sessions (admin on /dashboard front, buyer on /chat|/pesanan-saya|/home): 15/15 checks passed. (a) Buyer sends chat from /chat UI -> admin (sitting on dashboard, NO reload) gets toast 'Pesan baru dari Pembeli Demo', notif-chat-baru card count went 1->2 ('2 pesan belum dibaca'), drawer-badge-chat 1->2. (b) Buyer creates order (REST, same call the app makes) -> admin toast 'Pesanan baru DS-260913-70B2', notif-pesanan-baru card updated 4->5 via stats invalidation, drawer-badge-pesanan 4->5 (badges visually confirmed in open-drawer screenshot iter7_admin_drawer_badges.png). (c) Admin PUT status sedang_dikemas -> buyer on /pesanan-saya got toast 'Pesanan DS-260913-88B3: Sedang Dikemas' and the order card updated to 'Sedang Dikemas' WITHOUT reload (['orders'] invalidation works). Toast suppression: buyer viewing /chat received admin message in the open conversation in realtime (regression holds) with NO 'Pesan baru' toast (polled 4s); contrast check: same message while buyer on /home DOES toast. Card navigation: notif-chat-baru -> /dashboard/chat, notif-pesanan-baru -> /dashboard/pesanan (both verified). Regression: /api/chat/read zeroes room unread (backend test), admin rooms list live-update covered by socket regression tests. No red screens, no console errors. Conditional rendering (cards only when count>0) verified by code review (counts were >0 during E2E so only the visible path was exercised live).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_notifications_realtime.py",
+    "/app/test_reports/pytest/pytest_notifications_realtime.xml",
+    "/app/test_reports/screenshots/iter7_admin_drawer_badges.png",
+    "/app/test_reports/screenshots/iter7_admin_dashboard_notif.png",
+    "/app/test_reports/screenshots/iter7_buyer_pesanan.png",
+    "/app/test_reports/screenshots/iter7_suppression.png"
+  ],
+  "action_items": [
+    "None blocking. Optional: server.py is 1294 lines — split auth/orders/chat/socket into modules per 700-line guideline.",
+    "Optional: notification-listener suppression check uses pathname === '/chat' exactly; if a nested chat route is ever added (e.g. /chat/[room]), update the condition."
+  ],
+  "critical_code_review_comments": [
+    "notification-listener.tsx: handlers registered once per user via refs for pathname/room — correct pattern, no stale-closure toast suppression bugs; listeners removed on cleanup via socket.off. Verified live (suppression + non-suppression both correct).",
+    "server.py connect() enters EVERY user into their user_id room + admins into 'admins' — order_status emit to room=user_id verified delivered only to buyer; new_order to 'admins' verified not leaked to buyer.",
+    "update_order_status emits order_status with full {id,no_order,status,no_resi} payload on every PUT (including resi-only) — matches frontend toast + ['order',id] invalidation contract; verified for both dikirim-with-resi and resi-only update.",
+    "dashboard/index.tsx + dashboard/_layout.tsx both consume ['chat','unread'] and ['admin','stats'] query keys — single invalidation in NotificationListener updates cards AND drawer badges; verified counts moved 1->2 and 4->5 without reload.",
+    "Socket auth requires a valid session token and rejects otherwise (return False) — no anonymous rooms."
+  ],
+  "updated_files": ["/app/backend/tests/test_notifications_realtime.py"],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (15/15 E2E checks across 3 two-session scripts)"},
+  "seed_data_creation": "TEST orders on product 'TEST_Notif' (buyer 'Pembeli Demo'): DS-260913-1D3B (menunggu_konfirmasi, drives perlu_konfirmasi badge), DS-260913-70B2 (sedang_dikemas), DS-260913-88B3 (sedang_dikemas), + 4 backend-test orders (one sedang_dikemas, one dikirim TR-TEST... resi TEST-RESI-2, one dibatalkan, one menunggu_konfirmasi, others menunggu_pembayaran). TEST chat messages in buyer room user_d652d264c3e5 (TEST_e2e_notif_*, TEST_suppress_*, TEST_toast_home_*). Chat read state cleared for both sides at cleanup. NOTE: global admin unread may still show 1 from iteration_5's leftover 'someone-else-room'.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run notification backend tests SERIALLY: pytest /app/backend/tests/test_notifications_realtime.py -n 0 (pytest.ini forces xdist -n 2; socket/shared-state tests race under parallelism). UI two-session pattern: inject localStorage 'diana_session_token' (JSON-stringified) via add_init_script; drawer content (drawer-badge-chat / drawer-badge-pesanan) is IN THE DOM even when drawer is closed — assert textContent directly, open drawer via button[aria-label='Show navigation menu'] only for visuals. Toast element [data-testid='toast'] lives ~2.85s — use wait_for_function on its textContent. Admin chat room view is /chat?room=<uid> (same route as buyer), which is why suppression logic (pathname==='/chat') also covers admins. Closing the drawer via the 'Close drawer' aria button may pass the click through to a drawer item (landed on /dashboard/pelanggan once) — prefer page.goto to reset.",
+  "rca_of_issue": "Original bug: admin received no notification for incoming chats/orders — server only emitted chat to the buyer room and there was no notification UI. Verified fix: (1) socket connect puts every user in their user_id room, admins also in 'admins' room; (2) POST /api/orders emits new_order to 'admins'; PUT /api/orders/<id>/status emits order_status to buyer room; GET /api/admin/stats exposes perlu_konfirmasi; (3) global NotificationListener (mounted in root layout inside ToastProvider) converts socket events to toasts + react-query invalidations, with route-aware toast suppression for /chat; (4) dashboard front page renders 'Notifikasi' cards (notif-chat-baru / notif-pesanan-baru, only when count>0) and drawer shows red badges. All verified live with two concurrent sessions; no reload needed anywhere."
+}

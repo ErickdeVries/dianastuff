@@ -1,0 +1,42 @@
+{
+  "summary": "BOTH BUG FIXES VERIFIED. Backend: 10/10 pytest passed (test_session_admin_orders.py). (1) Session persistence: whitelist login (admin+buyer) -> /api/auth/me 200; invalid token -> 401; missing token -> 401; logout -> token invalidated server-side (/me -> 401). UI E2E (20/20 assertions): admin login -> full page reload -> still on /home (no login screen); goto / -> gated to /home; logout -> login screen -> reload stays logged out; injected garbage token -> /me 401 -> token cleared from localStorage -> redirected to login (regression holds). (2) Admin pesanan management: all 5 filter chips render and filter correctly; clicking 'Konfirmasi Pembayaran Diterima' on a menunggu_konfirmasi order moved it to sedang_dikemas (verified in UI filter + DB history); dikirim order shows resi-edit field PREFILLED with existing resi (TR-TEST-2) + 'Update Resi / Tracking' updates resi to TR-TEST-UI-9 WITHOUT a duplicate status_history entry (history stayed ['menunggu_pembayaran','sedang_dikemas','dikirim'] through resi-only update, then single 'selesai' appended by Tandai Selesai); 'Tandai Selesai' moved the order to selesai (gone from Dikirim filter, present under Selesai, DB confirms). Regression: menunggu_pembayaran orders show 'Proses -> Sedang Dikemas'; sedang_dikemas orders show resi input + 'Kirim -> Dikirim' (verified both in UI after transitions). Validation: dikirim without resi -> 400, bogus status -> 400, buyer PUT status -> 401/403. No red screens, no console errors (only expected 404s for non-existent TEST bukti image files). No deprecated expo packages found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/orders/{id}/bukti", "issue": "Sets status=menunggu_konfirmasi via $set WITHOUT pushing a status_history entry (unlike /konfirmasi-bayar which does push). Observed on TEST order 9de2489e: history jumps menunggu_pembayaran -> sedang_dikemas with no menunggu_konfirmasi row. Pre-existing, outside this fix scope, but inconsistent audit trail."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/dashboard/pesanan", "issues": ["'Konfirmasi Pembayaran Diterima' button label wraps to 2 lines on 375px width — readable and tappable, minor cosmetic note only"]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_session_admin_orders.py",
+    "/app/test_reports/pytest/pytest_session_admin_orders.xml",
+    "/app/test_reports/screenshots/iter6_admin_pesanan.png",
+    "/app/test_reports/screenshots/iter6_final.png"
+  ],
+  "action_items": [
+    "Optional: make POST /api/orders/{id}/bukti push a 'menunggu_konfirmasi' status_history entry for a consistent audit trail.",
+    "Optional: server.py is 1284 lines — split auth/orders/chat/socket into modules per 700-line guideline."
+  ],
+  "critical_code_review_comments": [
+    "auth.tsx loadFromToken correctly clears the token ONLY on ApiError 401 — network failures keep the token, matching the bug-fix intent; verified invalid-token path clears localStorage and redirects to login.",
+    "server.py:894 pushes status_history only when status != doc.status — resi-only updates are deduped; verified via API (history length unchanged) and via UI-driven update.",
+    "client.ts memoizes the token in memory AND persists via storage.secureSet (AsyncStorage/localStorage on web) — reload persistence verified.",
+    "Root layout gate correctly routes unauthenticated -> /login and authenticated -> /home on both reload and direct URL navigation."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_session_admin_orders.py"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% (20/20 E2E assertions)"},
+  "seed_data_creation": "TEST orders created for UI flow (product TEST_SessOrders, buyer 'Pembeli Demo'): 9de2489e (konfirmasi click -> now sedang_dikemas), 5c30a311 (resi updated to TR-TEST-UI-9 -> now selesai), 423678d8 (sedang_dikemas), 4a862c8d (menunggu_pembayaran) + 3 extra menunggu_pembayaran from validation tests. Seeded orders DS-260913-D86E (dikirim, TR-1) and DS-260913-F570 (selesai) left untouched. NOTE: DS-260913-B889 is now sedang_dikemas (confirmed before this run, likely by E1's smoke test).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/test_session_admin_orders.py (run serially with -o addopts='' since pytest.ini enables xdist; ui_orders pytest attr is per-run only — query GET /api/orders as admin to find TEST orders by item name TEST_SessOrders). UI selectors: M3TextField renders testID on wrapper View -> use '[data-testid=\"username-input\"] input'. Resi TextInput on web: '[data-testid=\"resi-edit-<id>\"] input' when present, else the testID element itself. Token in localStorage key 'diana_session_token' as JSON string. 404 console noise comes from non-existent TEST bukti image URLs — harmless.",
+  "rca_of_issue": "Bug 1 (re-login after app exit): previously any /api/auth/me failure (including network errors) wiped the stored token; fix restricts clearing to HTTP 401 only — verified. Bug 2 (no admin payment confirmation / tracking update): PUT /api/orders/<id>/status now skips status_history push when status unchanged, and admin UI gained Perlu Konfirmasi filter + 'Konfirmasi Pembayaran Diterima' (menunggu_konfirmasi -> sedang_dikemas), editable prefilled resi + 'Update Resi / Tracking' and 'Tandai Selesai' on dikirim orders — all verified end-to-end in UI + DB."
+}

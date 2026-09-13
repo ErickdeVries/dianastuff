@@ -81,6 +81,26 @@ Inter body. Language: Indonesian.
 - Dashboard admin: kartu "Penjualan Hari Ini" & "Penjualan Bulan Ini" (sum total order berstatus
   menunggu_konfirmasi/sedang_dikemas/dikirim/selesai, batas hari/bulan dalam WIB) di
   GET /api/admin/stats + /dashboard/index.tsx.
+- FIX chat realtime: admin tidak terima pesan — socket connect kini memasukkan admin ke room
+  broadcast "admins"; emit message ke [room, "admins"]; dashboard/chat.tsx listen "message" dan
+  invalidate rooms+unread; chat.tsx cleanup hanya melepas listener miliknya sendiri.
+- FIX sesi: /api/auth/me gagal karena jaringan TIDAK lagi menghapus token (hanya 401 yang
+  clearToken) — user tidak perlu login ulang setelah tutup app karena koneksi jelek.
+- Admin pesanan: tab filter (Semua/Perlu Konfirmasi/Dikemas/Dikirim/Selesai), tombol eksplisit
+  "Konfirmasi Pembayaran Diterima" untuk status menunggu_konfirmasi, "Update Resi / Tracking"
+  untuk pesanan dikirim (resi bisa diedit). Backend tidak lagi duplikat status_history saat
+  hanya resi yang berubah.
+- Notifikasi realtime in-app: socket connect auto-join room user sendiri (+ "admins" untuk admin);
+  backend emit "new_order" (POST /orders -> admins) dan "order_status" (PUT status -> room buyer);
+  `src/components/notification-listener.tsx` global menampilkan toast + invalidate query
+  (chat unread/rooms, orders, admin stats); drawer admin punya badge merah di Chat (unread) &
+  Pesanan (perlu_konfirmasi); dashboard depan punya kartu "Notifikasi" (Chat Baru + Pesanan
+  Perlu Konfirmasi, tap untuk navigasi). GET /api/admin/stats kini mengembalikan perlu_konfirmasi.
+- UX ala Shopee: setelah login, buyer LANGSUNG ke /toko (tanpa layar pilihan); admin tetap ke
+  /home. Header /toko: ikon chat (badge unread), keranjang (badge), akun (->/home); tombol back
+  hanya muncul jika ada riwayat navigasi. Bottom bar /produk/[id]: ikon chat -> /chat, ikon
+  keranjang (tambah ke keranjang + toast), tombol besar "Beli Sekarang <harga*qty>" -> add +
+  /checkout. Stepper jumlah pindah ke area info produk.
 
 
 ## Next Tasks
