@@ -1,9 +1,11 @@
 import MaterialDesignIcons from "@react-native-vector-icons/material-design-icons";
+import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { apiRequest } from "@/src/api/client";
 import { M3Button } from "@/src/components/m3-button";
 import { useAuth } from "@/src/context/auth";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
@@ -14,6 +16,14 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, logout } = useAuth();
+
+  const { data: unread } = useQuery<{ count: number }>({
+    queryKey: ["chat", "unread"],
+    queryFn: () => apiRequest<{ count: number }>("/api/chat/unread"),
+    enabled: !!user,
+    refetchInterval: 12000,
+  });
+  const unreadCount = unread?.count ?? 0;
 
   const displayName = user?.nama || user?.username || user?.email || "Pengguna";
 
@@ -75,7 +85,7 @@ export default function HomeScreen() {
             />
             <M3Button
               testID="chat-button"
-              label="Chat Admin"
+              label={unreadCount > 0 ? `Chat Admin (${unreadCount})` : "Chat Admin"}
               icon="chat-outline"
               variant="tonal"
               onPress={() => router.push("/chat")}

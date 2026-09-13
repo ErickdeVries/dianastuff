@@ -66,10 +66,17 @@ Inter body. Language: Indonesian.
 - Verified by testing agent (finalization): backend 25/25 + frontend flows — no bugs.
 
 ## Backlog (prioritized)
-- **P1**: Admin input ongkir_manual dari UI (sekarang lewat DB / hanya baca saat checkout).
-- **P2**: Kurir otomatis (RajaOngkir/dsb) menggantikan ongkir manual.
-- **P2**: Push notification saat status pesanan berubah (butuh build device).
+- **P2**: Kurir otomatis (RajaOngkir/dsb) — DIBATALKAN oleh user, diganti form ongkir manual.
 - **P3**: Refactor server.py jadi modul + Pydantic models untuk body dict.
+
+## Implemented (2026-06 fork)
+- Format tanggal diseragamkan jadi dd/mm/yyyy (util `formatDate`/`formatDateTime` di
+  `src/utils/format.ts`); dipakai di riwayat status order, list Pesanan Saya, dan list pesanan admin.
+- Ongkir manual: admin CRUD via `/dashboard/ongkir` (list + FAB tambah + modal add/edit +
+  hapus). Backend: GET/POST/PUT/DELETE `/api/admin/ongkir` (validasi duplikat kota+kurir,
+  harga >=0). Seed 4 tarif contoh saat kosong. Checkout pembeli tetap pakai `GET /api/ongkir`.
+- Google login (Emergent OAuth) diverifikasi berjalan di web preview (redirect ke Google benar).
+
 
 ## Next Tasks
 1. Admin approval dashboard.

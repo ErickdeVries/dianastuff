@@ -9,7 +9,7 @@ import { apiRequest } from "@/src/api/client";
 import { M3Button } from "@/src/components/m3-button";
 import { useToast } from "@/src/context/toast";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
-import { formatRupiah } from "@/src/utils/format";
+import { formatRupiah, formatDate } from "@/src/utils/format";
 import { resolveImageUrl } from "@/src/utils/image";
 import { STATUS_LABEL } from "@/src/utils/order";
 
@@ -23,6 +23,7 @@ type Order = {
   alamat: { nama?: string; kota?: string };
   items: { nama_produk: string; qty: number }[];
   bukti_bayar_url?: string | null;
+  created_at?: string | null;
 };
 
 export default function AdminPesananScreen() {
@@ -61,6 +62,7 @@ export default function AdminPesananScreen() {
         </View>
         <Text style={styles.meta}>{item.alamat?.nama} · {item.alamat?.kota}</Text>
         <Text style={styles.meta}>{totalQty} item · {formatRupiah(item.total)}</Text>
+        {item.created_at ? <Text style={styles.meta}>{formatDate(item.created_at)}</Text> : null}
 
         {item.bukti_bayar_url ? (
           <Pressable testID={`view-bukti-${item.id}`} onPress={() => setViewBukti(item.bukti_bayar_url!)} style={styles.buktiRow}>

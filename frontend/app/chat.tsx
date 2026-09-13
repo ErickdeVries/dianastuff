@@ -1,5 +1,5 @@
 import MaterialDesignIcons from "@react-native-vector-icons/material-design-icons";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -32,11 +32,21 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const toast = useToast();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   const params = useLocalSearchParams<{ room?: string; title?: string }>();
 
   const room = user?.role === "admin" ? params.room ?? "" : user?.user_id ?? "";
   const title = params.title || (user?.role === "admin" ? "Chat Pembeli" : "Chat Admin");
+
+  const markRead = () => {
+    apiRequest("/api/chat/read", { method: "POST", body: user?.role === "admin" ? { room } : {} })
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["chat", "unread"] });
+        queryClient.invalidateQueries({ queryKey: ["chat", "rooms"] });
+      })
+      .catch(() => {});
+  };
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
@@ -51,6 +61,8 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (history) setMessages(history);
+    if (history && room) markRead();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history]);
 
   useEffect(() => {
@@ -66,6 +78,7 @@ export default function ChatScreen() {
       const onMessage = (msg: Message) => {
         if (!active || msg.room !== room) return;
         setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+        if (msg.sender_id !== user?.user_id) markRead();
       };
       socket.on("message", onMessage);
     })();

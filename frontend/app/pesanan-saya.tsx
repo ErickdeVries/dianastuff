@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { apiRequest } from "@/src/api/client";
 import { M3Button } from "@/src/components/m3-button";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
-import { formatRupiah } from "@/src/utils/format";
+import { formatRupiah, formatDate } from "@/src/utils/format";
 import { STATUS_LABEL } from "@/src/utils/order";
 
 type Order = {
@@ -45,6 +45,7 @@ export default function PesananSaya() {
         <View style={{ flex: 1 }}>
           <Text style={styles.noOrder}>{item.no_order}</Text>
           <Text style={styles.meta}>{totalQty} item · {formatRupiah(item.total)}</Text>
+          {item.created_at ? <Text style={styles.meta}>{formatDate(item.created_at)}</Text> : null}
           <View style={[styles.statusPill, paid ? styles.statusPaid : styles.statusUnpaid]}>
             <Text style={[styles.statusText, { color: paid ? colors.onSuccess : colors.onWarning }]}>
               {STATUS_LABEL[item.status] ?? item.status}

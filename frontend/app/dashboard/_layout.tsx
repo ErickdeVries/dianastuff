@@ -13,6 +13,7 @@ const ITEMS: Item[] = [
   { name: "index", label: "Dashboard", icon: "view-dashboard-outline" },
   { name: "produk", label: "Produk", icon: "tag-outline" },
   { name: "pesanan", label: "Pesanan", icon: "receipt-text-outline" },
+  { name: "ongkir", label: "Ongkir Manual", icon: "truck-outline" },
   { name: "pelanggan", label: "Pelanggan", icon: "account-group-outline" },
   { name: "profil", label: "Pengaturan Toko", icon: "store-cog-outline" },
   { name: "chat", label: "Chat", icon: "chat-outline" },
@@ -105,6 +106,7 @@ export default function DashboardLayout() {
       <Drawer.Screen name="index" options={{ title: "Dashboard" }} />
       <Drawer.Screen name="produk" options={{ title: "Produk" }} />
       <Drawer.Screen name="pesanan" options={{ title: "Pesanan" }} />
+      <Drawer.Screen name="ongkir" options={{ title: "Ongkir Manual" }} />
       <Drawer.Screen name="pelanggan" options={{ title: "Pelanggan" }} />
       <Drawer.Screen name="profil" options={{ title: "Pengaturan Toko" }} />
       <Drawer.Screen name="chat" options={{ title: "Chat" }} />

@@ -12,7 +12,7 @@ import { M3Button } from "@/src/components/m3-button";
 import { useAuth } from "@/src/context/auth";
 import { useToast } from "@/src/context/toast";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
-import { formatRupiah } from "@/src/utils/format";
+import { formatRupiah, formatDateTime } from "@/src/utils/format";
 import { resolveImageUrl } from "@/src/utils/image";
 import { STATUS_LABEL } from "@/src/utils/order";
 
@@ -31,6 +31,7 @@ type Order = {
   kurir?: string;
   bukti_bayar_url?: string | null;
   review?: Review;
+  status_history?: { status: string; at: string | null }[];
 };
 type Profil = { nama_toko: string; whatsapp?: string; rekening_bank: { bank: string; no_rek: string; a_n: string }[] };
 
@@ -161,6 +162,21 @@ export default function OrderDetail() {
           <View style={styles.resiBox} testID="order-resi">
             <MaterialDesignIcons name="truck-fast-outline" size={20} color={colors.brandPrimary} />
             <Text style={styles.resiText}>No. Resi ({order.kurir}): <Text style={styles.resiBold}>{order.no_resi}</Text></Text>
+          </View>
+        ) : null}
+
+        {order?.status_history && order.status_history.length > 0 ? (
+          <View style={styles.card} testID="status-history">
+            <Text style={styles.cardTitle}>Riwayat Status</Text>
+            {[...order.status_history].reverse().map((h, i) => (
+              <View key={i} style={styles.historyRow}>
+                <View style={styles.historyDot} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.historyStatus}>{STATUS_LABEL[h.status] ?? h.status}</Text>
+                  {h.at ? <Text style={styles.historyTime}>{formatDateTime(h.at)}</Text> : null}
+                </View>
+              </View>
+            ))}
           </View>
         ) : null}
 
@@ -316,6 +332,10 @@ const useStyles = makeStyles((colors) => ({
   resiBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.brandTertiary, borderRadius: 12, padding: 12 },
   resiText: { flex: 1, fontFamily: fonts.body, fontSize: 13, color: colors.onBrandTertiary },
   resiBold: { fontFamily: fonts.bodyMedium },
+  historyRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  historyDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.brandPrimary, marginTop: 4 },
+  historyStatus: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onSurface },
+  historyTime: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, marginTop: 1 },
   card: { backgroundColor: colors.surfaceSecondary, borderRadius: 18, padding: 16, gap: 10 },
   cardTitle: { fontFamily: fonts.heading, fontSize: 16, color: colors.onSurface },
   itemRow: { flexDirection: "row", alignItems: "center", gap: 12 },

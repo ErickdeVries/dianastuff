@@ -7,7 +7,7 @@ import { FlatList, Pressable, Text, View } from "react-native";
 import { apiRequest } from "@/src/api/client";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 
-type Room = { room: string; nama: string; last_text: string; last_at: string | null };
+type Room = { room: string; nama: string; last_text: string; last_at: string | null; unread: number };
 
 export default function AdminChatScreen() {
   const styles = useStyles();
@@ -34,6 +34,11 @@ export default function AdminChatScreen() {
         <Text style={styles.name}>{item.nama}</Text>
         <Text style={styles.last} numberOfLines={1}>{item.last_text || "—"}</Text>
       </View>
+      {item.unread > 0 ? (
+        <View style={styles.badge} testID={`unread-${item.room}`}>
+          <Text style={styles.badgeText}>{item.unread}</Text>
+        </View>
+      ) : null}
       <MaterialDesignIcons name="chevron-right" size={22} color={colors.muted} />
     </Pressable>
   );
@@ -63,6 +68,8 @@ const useStyles = makeStyles((colors) => ({
   avatarText: { fontFamily: fonts.heading, fontSize: 18, color: colors.onBrandTertiary },
   name: { fontFamily: fonts.bodyMedium, fontSize: 15, color: colors.onSurface },
   last: { fontFamily: fonts.body, fontSize: 13, color: colors.muted, marginTop: 2 },
+  badge: { minWidth: 22, height: 22, borderRadius: 11, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center", paddingHorizontal: 6 },
+  badgeText: { fontFamily: fonts.bodyMedium, fontSize: 11, color: colors.onBrandPrimary },
   empty: { alignItems: "center", gap: 8, paddingVertical: 100 },
   emptyText: { fontFamily: fonts.body, fontSize: 15, color: colors.muted },
 }));

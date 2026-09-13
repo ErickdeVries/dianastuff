@@ -181,6 +181,12 @@ class OrderCreate(BaseModel):
     catatan: Optional[str] = None
 
 
+class OngkirIn(BaseModel):
+    kota: str
+    kurir: str
+    harga: float = 0
+
+
 DEFAULT_KURIR = ["JNE", "J&T", "Lion Parcel", "Gosend Instan/Sameday"]
 
 
@@ -627,6 +633,10 @@ def order_public(o: dict) -> dict:
         "catatan": o.get("catatan"),
         "bukti_bayar_url": o.get("bukti_bayar_url"),
         "review": o.get("review"),
+        "status_history": [
+            {"status": h.get("status"), "at": h["at"].isoformat() if h.get("at") else None}
+            for h in (o.get("status_history") or [])
+        ],
         "created_at": o.get("created_at").isoformat() if o.get("created_at") else None,
     }
 
@@ -660,6 +670,82 @@ async def cek_ongkir(kota: str, kurir: str, user: dict = Depends(get_current_use
     if not row:
         return {"found": False, "harga": None}
     return {"found": True, "harga": row.get("harga", 0)}
+
+
+# ---------------------------------------------------------------------------
+# Admin: manual shipping cost (ongkir) management
+# ---------------------------------------------------------------------------
+def ongkir_public(o: dict) -> dict:
+    return {
+        "id": o.get("id"),
+        "kota": o.get("kota", ""),
+        "kurir": o.get("kurir", ""),
+        "harga": o.get("harga", 0),
+    }
+
+
+@api_router.get("/admin/ongkir")
+async def list_ongkir(admin: dict = Depends(require_admin)):
+    docs = await db.ongkir_manual.find({}, {"_id": 0}).sort([("kota", 1), ("kurir", 1)]).to_list(1000)
+    return [ongkir_public(d) for d in docs]
+
+
+@api_router.post("/admin/ongkir")
+async def create_ongkir(payload: OngkirIn, admin: dict = Depends(require_admin)):
+    kota = payload.kota.strip()
+    kurir = payload.kurir.strip()
+    if not kota or not kurir:
+        raise HTTPException(status_code=400, detail="Kota dan kurir wajib diisi")
+    if payload.harga < 0:
+        raise HTTPException(status_code=400, detail="Harga tidak valid")
+    existing = await db.ongkir_manual.find_one(
+        {"kota": {"$regex": f"^{re.escape(kota)}$", "$options": "i"}, "kurir": kurir}
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="Tarif untuk kota & kurir ini sudah ada")
+    doc = {
+        "id": f"ongkir_{uuid.uuid4().hex[:12]}",
+        "kota": kota,
+        "kurir": kurir,
+        "harga": payload.harga,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.ongkir_manual.insert_one(doc)
+    return ongkir_public(doc)
+
+
+@api_router.put("/admin/ongkir/{ongkir_id}")
+async def update_ongkir(ongkir_id: str, payload: OngkirIn, admin: dict = Depends(require_admin)):
+    existing = await db.ongkir_manual.find_one({"id": ongkir_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Tarif tidak ditemukan")
+    kota = payload.kota.strip()
+    kurir = payload.kurir.strip()
+    if not kota or not kurir:
+        raise HTTPException(status_code=400, detail="Kota dan kurir wajib diisi")
+    if payload.harga < 0:
+        raise HTTPException(status_code=400, detail="Harga tidak valid")
+    dup = await db.ongkir_manual.find_one({
+        "id": {"$ne": ongkir_id},
+        "kota": {"$regex": f"^{re.escape(kota)}$", "$options": "i"},
+        "kurir": kurir,
+    })
+    if dup:
+        raise HTTPException(status_code=409, detail="Tarif untuk kota & kurir ini sudah ada")
+    await db.ongkir_manual.update_one(
+        {"id": ongkir_id},
+        {"$set": {"kota": kota, "kurir": kurir, "harga": payload.harga}},
+    )
+    doc = await db.ongkir_manual.find_one({"id": ongkir_id}, {"_id": 0})
+    return ongkir_public(doc)
+
+
+@api_router.delete("/admin/ongkir/{ongkir_id}")
+async def delete_ongkir(ongkir_id: str, admin: dict = Depends(require_admin)):
+    res = await db.ongkir_manual.delete_one({"id": ongkir_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Tarif tidak ditemukan")
+    return {"message": "Tarif dihapus"}
 
 
 @api_router.post("/orders")
@@ -712,6 +798,7 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
         "ongkir": ongkir,
         "total": total,
         "status": "menunggu_pembayaran",
+        "status_history": [{"status": "menunggu_pembayaran", "at": now}],
         "alamat": {
             "nama": user.get("nama"),
             "wa": user.get("wa"),
@@ -774,7 +861,7 @@ async def konfirmasi_bayar(order_id: str, user: dict = Depends(get_current_user)
         raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
     if user.get("role") != "admin" and doc.get("user_id") != user["user_id"]:
         raise HTTPException(status_code=403, detail="Akses ditolak")
-    await db.orders.update_one({"id": order_id}, {"$set": {"status": "menunggu_konfirmasi"}})
+    await db.orders.update_one({"id": order_id}, {"$set": {"status": "menunggu_konfirmasi"}, "$push": {"status_history": {"status": "menunggu_konfirmasi", "at": datetime.now(timezone.utc)}}})
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return order_public(updated)
 
@@ -801,7 +888,7 @@ async def update_order_status(order_id: str, body: dict, admin: dict = Depends(r
         ongkir = max(0.0, float(body["ongkir"]))
         update["ongkir"] = ongkir
         update["total"] = doc.get("subtotal", 0) + ongkir
-    await db.orders.update_one({"id": order_id}, {"$set": update})
+    await db.orders.update_one({"id": order_id}, {"$set": update, "$push": {"status_history": {"status": status, "at": datetime.now(timezone.utc)}}})
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return order_public(updated)
 
@@ -857,17 +944,20 @@ async def chat_rooms(admin: dict = Depends(require_admin)):
     async for g in db.chats.aggregate(pipeline):
         last = g["last"]
         buyer = await db.users.find_one({"user_id": g["_id"]}, {"_id": 0})
+        unread = await db.chats.count_documents({"room": g["_id"], "read_admin": False})
         rooms.append({
             "room": g["_id"],
             "nama": (buyer or {}).get("nama") or (buyer or {}).get("username") or "Pembeli",
             "last_text": last.get("text") or ("[Gambar]" if last.get("image_url") else ""),
             "last_at": last.get("created_at").isoformat() if last.get("created_at") else None,
+            "unread": unread,
         })
     rooms.sort(key=lambda r: r.get("last_at") or "", reverse=True)
     return rooms
 
 
 async def save_chat_message(room: str, sender: dict, text: Optional[str], image_url: Optional[str]) -> dict:
+    is_admin = sender.get("role") == "admin"
     doc = {
         "id": uuid.uuid4().hex,
         "room": room,
@@ -876,10 +966,33 @@ async def save_chat_message(room: str, sender: dict, text: Optional[str], image_
         "sender_nama": sender.get("nama") or sender.get("username"),
         "text": text,
         "image_url": image_url,
+        "read_admin": is_admin,
+        "read_buyer": not is_admin,
         "created_at": datetime.now(timezone.utc),
     }
     await db.chats.insert_one(doc)
     return doc
+
+
+@api_router.get("/chat/unread")
+async def chat_unread(user: dict = Depends(get_current_user)):
+    if user.get("role") == "admin":
+        count = await db.chats.count_documents({"read_admin": False})
+    else:
+        count = await db.chats.count_documents({"room": user["user_id"], "read_buyer": False})
+    return {"count": count}
+
+
+@api_router.post("/chat/read")
+async def chat_read(body: dict, user: dict = Depends(get_current_user)):
+    if user.get("role") == "admin":
+        room = (body or {}).get("room")
+        if not room:
+            raise HTTPException(status_code=400, detail="Room diperlukan")
+        await db.chats.update_many({"room": room, "read_admin": False}, {"$set": {"read_admin": True}})
+    else:
+        await db.chats.update_many({"room": user["user_id"], "read_buyer": False}, {"$set": {"read_buyer": True}})
+    return {"ok": True}
 
 
 @api_router.post("/chat/send")
@@ -1040,6 +1153,20 @@ async def on_startup():
             s["deleted_at"] = None
         await db.products.insert_many(samples)
         logger.info("Seeded sample products")
+
+    # Seed sample manual shipping rates (only when empty) so checkout works.
+    if await db.ongkir_manual.count_documents({}) == 0:
+        ongkir_samples = [
+            {"kota": "Jakarta", "kurir": "JNE", "harga": 12000},
+            {"kota": "Jakarta", "kurir": "J&T", "harga": 11000},
+            {"kota": "Bandung", "kurir": "JNE", "harga": 15000},
+            {"kota": "Surabaya", "kurir": "JNE", "harga": 20000},
+        ]
+        for o in ongkir_samples:
+            o["id"] = f"ongkir_{uuid.uuid4().hex[:12]}"
+            o["created_at"] = datetime.now(timezone.utc)
+        await db.ongkir_manual.insert_many(ongkir_samples)
+        logger.info("Seeded sample ongkir_manual")
 
 
 
