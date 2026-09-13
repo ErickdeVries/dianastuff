@@ -1,4 +1,6 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Header, Depends, UploadFile, File, Form, Request
+from fastapi.responses import Response
+from fastapi.concurrency import run_in_threadpool
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -8,6 +10,7 @@ import uuid
 import secrets
 import bcrypt
 import httpx
+import requests
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -36,7 +39,58 @@ logger = logging.getLogger("diana")
 # ---------------------------------------------------------------------------
 EMERGENT_SESSION_DATA_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
 SESSION_DAYS = 7
-DEFAULT_WHATSAPP = "085312812452"
+DEFAULT_WHATSAPP = "6285312812452"
+
+# ---------------------------------------------------------------------------
+# Emergent Object Storage
+# ---------------------------------------------------------------------------
+STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
+STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
+EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+APP_NAME = "diana-stuff"
+_storage_key: Optional[str] = None
+
+
+def init_storage() -> str:
+    global _storage_key
+    if _storage_key:
+        return _storage_key
+    resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
+    resp.raise_for_status()
+    _storage_key = resp.json()["storage_key"]
+    return _storage_key
+
+
+def put_object(path: str, data: bytes, content_type: str) -> dict:
+    key = init_storage()
+    resp = requests.put(
+        f"{STORAGE_URL}/objects/{path}",
+        headers={"X-Storage-Key": key, "Content-Type": content_type},
+        data=data,
+        timeout=120,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_object(path: str) -> tuple[bytes, str]:
+    global _storage_key
+    key = init_storage()
+    resp = requests.get(
+        f"{STORAGE_URL}/objects/{path}",
+        headers={"X-Storage-Key": key},
+        timeout=60,
+    )
+    if resp.status_code == 503:
+        _storage_key = None
+        key = init_storage()
+        resp = requests.get(
+            f"{STORAGE_URL}/objects/{path}",
+            headers={"X-Storage-Key": key},
+            timeout=60,
+        )
+    resp.raise_for_status()
+    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +125,34 @@ class RegisterWhitelist(BaseModel):
 class LoginWhitelist(BaseModel):
     username: str
     password: str
+
+
+class ProductIn(BaseModel):
+    kategori: str = ""
+    nama_produk: str
+    deskripsi: str = ""
+    harga: float = 0
+    stok: int = 0
+    berat_gram: int = 0
+    bisa_po: bool = False
+    foto_urls: List[str] = Field(default_factory=list)
+
+
+class CustomerIn(BaseModel):
+    email: Optional[str] = None
+    username: str
+    password: Optional[str] = None
+    nama: str
+    wa: Optional[str] = None
+    status: str = "approved"
+
+
+class ProfilUpdate(BaseModel):
+    nama_toko: str
+    logo_url: Optional[str] = None
+    banner_url: Optional[str] = None
+    rekening_bank: List[RekeningBank] = Field(default_factory=list)
+    whatsapp: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +215,28 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     if not user:
         raise HTTPException(status_code=401, detail="Pengguna tidak ditemukan")
     return user
+
+
+async def require_admin(authorization: Optional[str] = Header(None)) -> dict:
+    user = await get_current_user(authorization)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Akses khusus admin")
+    return user
+
+
+def product_public(p: dict) -> dict:
+    return {
+        "id": p.get("id"),
+        "kategori": p.get("kategori", ""),
+        "nama_produk": p.get("nama_produk"),
+        "deskripsi": p.get("deskripsi", ""),
+        "harga": p.get("harga", 0),
+        "stok": p.get("stok", 0),
+        "berat_gram": p.get("berat_gram", 0),
+        "bisa_po": p.get("bisa_po", False),
+        "foto_urls": p.get("foto_urls", []),
+        "created_at": p.get("created_at").isoformat() if p.get("created_at") else None,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -278,16 +382,231 @@ async def logout(authorization: Optional[str] = Header(None)):
 
 
 # ---------------------------------------------------------------------------
+# Uploads / file serving (Emergent Object Storage)
+# ---------------------------------------------------------------------------
+@api_router.post("/upload")
+async def upload_file(file: UploadFile = File(...), admin: dict = Depends(require_admin)):
+    content = await file.read()
+    if len(content) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Ukuran foto maksimal 8MB")
+    content_type = file.content_type or "image/jpeg"
+    ext = (file.filename or "img.jpg").rsplit(".", 1)[-1].lower()
+    if len(ext) > 5:
+        ext = "jpg"
+    path = f"{APP_NAME}/uploads/{admin['user_id']}/{uuid.uuid4().hex}.{ext}"
+    try:
+        await run_in_threadpool(put_object, path, content, content_type)
+    except requests.HTTPError as e:
+        status = e.response.status_code if e.response is not None else 500
+        if status == 402:
+            raise HTTPException(status_code=402, detail="Kuota penyimpanan habis")
+        raise HTTPException(status_code=502, detail="Gagal mengunggah foto")
+    return {"path": path, "url": f"/api/files/{path}"}
+
+
+@api_router.get("/files/{path:path}")
+async def serve_file(path: str):
+    # Public read: store branding + catalog photos are meant to be shown to
+    # everyone, including the unauthenticated login screen.
+    try:
+        content, content_type = await run_in_threadpool(get_object, path)
+    except Exception:
+        raise HTTPException(status_code=404, detail="File tidak ditemukan")
+    return Response(content=content, media_type=content_type, headers={"Cache-Control": "public, max-age=86400"})
+
+
+# ---------------------------------------------------------------------------
+# Products (public read; admin write)
+# ---------------------------------------------------------------------------
+@api_router.get("/products")
+async def list_products(search: Optional[str] = None):
+    query: dict = {"deleted_at": None}
+    if search:
+        query["$or"] = [
+            {"nama_produk": {"$regex": search, "$options": "i"}},
+            {"kategori": {"$regex": search, "$options": "i"}},
+        ]
+    docs = await db.products.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [product_public(d) for d in docs]
+
+
+@api_router.get("/products/{product_id}")
+async def get_product(product_id: str):
+    doc = await db.products.find_one({"id": product_id, "deleted_at": None}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Produk tidak ditemukan")
+    return product_public(doc)
+
+
+@api_router.post("/products")
+async def create_product(payload: ProductIn, admin: dict = Depends(require_admin)):
+    doc = payload.dict()
+    doc["id"] = uuid.uuid4().hex
+    doc["created_at"] = datetime.now(timezone.utc)
+    doc["deleted_at"] = None
+    await db.products.insert_one(doc)
+    return product_public(doc)
+
+
+@api_router.put("/products/{product_id}")
+async def update_product(product_id: str, payload: ProductIn, admin: dict = Depends(require_admin)):
+    res = await db.products.update_one(
+        {"id": product_id, "deleted_at": None},
+        {"$set": payload.dict()},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Produk tidak ditemukan")
+    doc = await db.products.find_one({"id": product_id}, {"_id": 0})
+    return product_public(doc)
+
+
+@api_router.delete("/products/{product_id}")
+async def delete_product(product_id: str, admin: dict = Depends(require_admin)):
+    res = await db.products.update_one(
+        {"id": product_id, "deleted_at": None},
+        {"$set": {"deleted_at": datetime.now(timezone.utc)}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Produk tidak ditemukan")
+    return {"message": "Produk dihapus"}
+
+
+# ---------------------------------------------------------------------------
+# Customers (whitelist buyers) — admin only
+# ---------------------------------------------------------------------------
+@api_router.get("/admin/customers")
+async def list_customers(search: Optional[str] = None, admin: dict = Depends(require_admin)):
+    query: dict = {"role": "buyer", "deleted_at": None}
+    if search:
+        query["$or"] = [
+            {"nama": {"$regex": search, "$options": "i"}},
+            {"username": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}},
+        ]
+    docs = await db.users.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [public_user(d) for d in docs]
+
+
+@api_router.post("/admin/customers")
+async def create_customer(payload: CustomerIn, admin: dict = Depends(require_admin)):
+    username = payload.username.strip().lower()
+    if len(username) < 3:
+        raise HTTPException(status_code=400, detail="Username minimal 3 karakter")
+    if not payload.password or len(payload.password) < 6:
+        raise HTTPException(status_code=400, detail="Password minimal 6 karakter")
+    if await db.users.find_one({"username": username, "deleted_at": None}):
+        raise HTTPException(status_code=409, detail="Username sudah digunakan")
+    if payload.email and await db.users.find_one({"email": payload.email, "deleted_at": None}):
+        raise HTTPException(status_code=409, detail="Email sudah terdaftar")
+    user = {
+        "user_id": f"user_{uuid.uuid4().hex[:12]}",
+        "email": payload.email,
+        "username": username,
+        "password_hash": hash_password(payload.password),
+        "role": "buyer",
+        "nama": payload.nama.strip(),
+        "wa": payload.wa,
+        "alamat": None,
+        "kota": None,
+        "kode_pos": None,
+        "status": payload.status or "approved",
+        "auth_provider": "whitelist",
+        "picture": None,
+        "created_at": datetime.now(timezone.utc),
+        "deleted_at": None,
+    }
+    await db.users.insert_one(user)
+    return public_user(user)
+
+
+@api_router.put("/admin/customers/{user_id}")
+async def update_customer(user_id: str, payload: CustomerIn, admin: dict = Depends(require_admin)):
+    existing = await db.users.find_one({"user_id": user_id, "role": "buyer", "deleted_at": None})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Pelanggan tidak ditemukan")
+    update: dict = {
+        "email": payload.email,
+        "nama": payload.nama.strip(),
+        "wa": payload.wa,
+        "status": payload.status or existing.get("status", "approved"),
+    }
+    new_username = payload.username.strip().lower()
+    if new_username and new_username != existing.get("username"):
+        if await db.users.find_one({"username": new_username, "deleted_at": None}):
+            raise HTTPException(status_code=409, detail="Username sudah digunakan")
+        update["username"] = new_username
+    if payload.password:
+        if len(payload.password) < 6:
+            raise HTTPException(status_code=400, detail="Password minimal 6 karakter")
+        update["password_hash"] = hash_password(payload.password)
+    await db.users.update_one({"user_id": user_id}, {"$set": update})
+    doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    return public_user(doc)
+
+
+@api_router.delete("/admin/customers/{user_id}")
+async def delete_customer(user_id: str, admin: dict = Depends(require_admin)):
+    res = await db.users.update_one(
+        {"user_id": user_id, "role": "buyer", "deleted_at": None},
+        {"$set": {"deleted_at": datetime.now(timezone.utc)}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Pelanggan tidak ditemukan")
+    await db.user_sessions.delete_many({"user_id": user_id})
+    return {"message": "Pelanggan dihapus"}
+
+
+# ---------------------------------------------------------------------------
+# Store profile update — admin only
+# ---------------------------------------------------------------------------
+@api_router.put("/profil_admin")
+async def update_profil(payload: ProfilUpdate, admin: dict = Depends(require_admin)):
+    if not payload.whatsapp or not payload.whatsapp.strip():
+        raise HTTPException(status_code=400, detail="Nomor WA wajib diisi")
+    if not payload.nama_toko or not payload.nama_toko.strip():
+        raise HTTPException(status_code=400, detail="Nama toko wajib diisi")
+    data = {
+        "nama_toko": payload.nama_toko.strip(),
+        "logo_url": payload.logo_url,
+        "banner_url": payload.banner_url,
+        "rekening_bank": [r.dict() for r in payload.rekening_bank],
+        "whatsapp": payload.whatsapp.strip(),
+    }
+    await db.profil_admin.update_one({}, {"$set": data}, upsert=True)
+    profil = await db.profil_admin.find_one({}, {"_id": 0})
+    return profil
+
+
+# ---------------------------------------------------------------------------
+# Dashboard stats — admin only
+# ---------------------------------------------------------------------------
+@api_router.get("/admin/stats")
+async def admin_stats(admin: dict = Depends(require_admin)):
+    produk = await db.products.count_documents({"deleted_at": None})
+    pelanggan = await db.users.count_documents({"role": "buyer", "deleted_at": None})
+    pending = await db.users.count_documents({"role": "buyer", "status": "pending", "deleted_at": None})
+    return {"produk": produk, "pelanggan": pelanggan, "pending": pending, "pesanan": 0}
+
+
+
+# ---------------------------------------------------------------------------
 # Startup: indexes + seed data
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def on_startup():
+    try:
+        await run_in_threadpool(init_storage)
+        logger.info("Object storage initialized")
+    except Exception as e:
+        logger.warning(f"Object storage init failed: {e}")
+
     await db.users.create_index("user_id", unique=True)
     await db.users.create_index("username", sparse=True)
     await db.users.create_index("email", sparse=True)
     await db.user_sessions.create_index("session_token", unique=True)
     await db.user_sessions.create_index("user_id")
     await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
+    await db.products.create_index("id", unique=True)
 
     # Seed store profile with sample data so the app works out of the box.
     if not await db.profil_admin.find_one({}):
@@ -301,6 +620,11 @@ async def on_startup():
             "whatsapp": DEFAULT_WHATSAPP,
         })
         logger.info("Seeded profil_admin")
+    else:
+        # Ensure the store WhatsApp is set (in international 62 format).
+        profil = await db.profil_admin.find_one({})
+        if not (profil or {}).get("whatsapp"):
+            await db.profil_admin.update_one({}, {"$set": {"whatsapp": DEFAULT_WHATSAPP}})
 
     # Seed a default admin whitelist account.
     if not await db.users.find_one({"username": "admin"}):
@@ -322,6 +646,27 @@ async def on_startup():
             "deleted_at": None,
         })
         logger.info("Seeded admin user")
+
+    # Seed a default buyer whitelist account (approved).
+    if not await db.users.find_one({"username": "buyer"}):
+        await db.users.insert_one({
+            "user_id": f"user_{uuid.uuid4().hex[:12]}",
+            "email": "buyer@dianastuff.local",
+            "username": "buyer",
+            "password_hash": hash_password("buyer123"),
+            "role": "buyer",
+            "nama": "Pembeli Demo",
+            "wa": "081234567890",
+            "alamat": None,
+            "kota": None,
+            "kode_pos": None,
+            "status": "approved",
+            "auth_provider": "whitelist",
+            "picture": None,
+            "created_at": datetime.now(timezone.utc),
+            "deleted_at": None,
+        })
+        logger.info("Seeded buyer user")
 
 
 app.include_router(api_router)

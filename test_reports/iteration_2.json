@@ -1,0 +1,31 @@
+{
+  "summary": "Admin Dashboard feature tested end-to-end. Backend: 26/26 pytest passed (admin/stats auth guards + payload, products CRUD+search+soft-delete, admin write=403 for buyer/401 no token, customers CRUD incl. status/password update + duplicate username 409 + short password 400 + soft-delete, profil_admin PUT validation for empty WA/nama_toko + persistence, /api/upload admin-only + /api/files/{path} public read of uploaded PNG, seed data profil_admin whatsapp=6285312812452 & admin/buyer users). Frontend (390x844): admin login -> home shows 'Buka Dashboard Admin'; /dashboard stats visible; /dashboard/produk FAB opens product-form; created product 'TEST_UI_*' appears in list, product-search filters it, delete via ConfirmDialog confirm-ok removes it. /dashboard/pelanggan FAB opens customer-form; created customer appears; customer-status-toggle + save works. /dashboard/profil clearing whatsapp+save shows red alert 'Nomor WA wajib diisi' (profil-error); valid save shows profil-success. Buyer buyer/buyer123 has no open-dashboard-button and visiting /dashboard redirects to /home. No red screens, no expo/react-native deprecated packages found.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/dashboard (index)", "issues": ["stat card testID uses Indonesian label 'Menunggu Approval' rather than 'Pending' as implied by the review request. This is cosmetic only — value renders correctly (3 pending)."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_dashboard.py",
+    "/app/backend/tests/test_diana_auth.py",
+    "/app/test_reports/pytest/pytest_admin_dashboard.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "product-form and customer-form call router.back() after save; when opened via a deep link (no back stack) this triggers a 'GO_BACK was not handled' warning. In-app FAB navigation works fine, but consider router.replace('/dashboard/produk') / router.replace('/dashboard/pelanggan') as a safer fallback.",
+    "server.py still uses deprecated FastAPI @app.on_event('startup') hooks — cosmetic only.",
+    "PUT /api/admin/customers/{id} allows setting/changing username without a length check on the new value (unlike POST which enforces >=3). Minor validation gap.",
+    "/api/upload accepts any content-type; consider restricting to image/* explicitly (currently only extension is trusted for storage path)."
+  ],
+  "updated_files": ["/app/backend/tests/test_admin_dashboard.py"],
+  "success_rate": {"backend": "100% (26/26)", "frontend": "100% of requested flows"},
+  "seed_data_creation": "No manual seed needed — backend startup seeds profil_admin (whatsapp 6285312812452), admin/admin123, buyer/buyer123. UI test created and deleted a product (soft-deleted) and left one 'tcust*' buyer + one status-toggled customer in DB from previous manual runs (harmless).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/test_admin_dashboard.py + test_diana_auth.py for regression. Frontend M3TextField wraps a real <input>/<textarea>; select via '[data-testid=\"<containerTestID>\"] input' (e.g. product-nama, customer-username). Opening product-form/customer-form via deep link is not recommended — go via /dashboard/produk (or /pelanggan) FAB so router.back() works after save. profil-error text starts with an icon glyph (\\U000f05d6) followed by 'Nomor WA wajib diisi'.",
+  "rca_of_issue": "N/A — no bugs found."
+}

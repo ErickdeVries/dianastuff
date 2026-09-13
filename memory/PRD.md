@@ -37,18 +37,23 @@ Inter body. Language: Indonesian.
 ## Implemented (2026-09-13)
 - Backend: GET /api/profil_admin; POST /api/auth/session + /api/auth/login-email (Google);
   POST /api/auth/register-whitelist; POST /api/auth/login-whitelist; GET /api/auth/me;
-  POST /api/auth/logout. Startup seeds profil_admin (WA 085312812452) + admin/admin123.
-- Frontend: Login screen (2 tabs, banner+logo header, segmented control, Google button,
-  whitelist form, sticky WhatsApp FAB with empty-number fallback), Register screen (pending
-  success state), Home screen (welcome + role badge + logout), root-layout auth gate.
-- Verified by testing agent: 12/12 backend tests + full frontend flow, no bugs.
+  POST /api/auth/logout. Startup seeds profil_admin (WA 6285312812452) + admin/admin123 + buyer/buyer123.
+- Backend admin: products CRUD (GET public + search, POST/PUT/DELETE admin, soft delete);
+  customers CRUD (/api/admin/customers, buyers only); PUT /api/profil_admin (WA required);
+  GET /api/admin/stats; POST /api/upload + GET /api/files/{path} via Emergent Object Storage.
+- Frontend: Login (2 tabs + WhatsApp CTA), Register, Home (admin sees "Buka Dashboard Admin").
+- Frontend admin dashboard (/dashboard, admin-only, drawer sidebar): overview stats + quick
+  actions; Produk (list/search/add/edit/delete, up to 5 photo uploads); Pelanggan (CRUD +
+  approve/pending toggle); Pengaturan Toko (nama_toko, logo, banner, rekening_bank[], WA with
+  red "Nomor WA wajib diisi" validation); Pesanan & Chat placeholders.
+- Verified by testing agent twice: auth flow (12/12) + admin dashboard (26/26) + frontend flows,
+  no bugs.
 
 ## Backlog (prioritized)
-- **P0**: Admin approval UI (list pending buyers, approve/reject).
-- **P1**: Store profile editor for admin (nama_toko, logo, banner, rekening, WhatsApp).
-- **P1**: Product catalog (list + detail) — `products` collection.
+- **P1**: Product catalog for buyers (browse products list + detail).
 - **P2**: Cart & orders (`orders`), WhatsApp checkout with bank transfer details.
-- **P2**: In-app chat (`chats`) buyer ↔ admin.
+- **P2**: In-app chat (`chats`) buyer ↔ admin (currently placeholder).
+- **P2**: Pesanan management screen for admin (currently placeholder).
 
 ## Next Tasks
 1. Admin approval dashboard.

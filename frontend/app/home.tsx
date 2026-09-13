@@ -1,5 +1,6 @@
 import MaterialDesignIcons from "@react-native-vector-icons/material-design-icons";
 import { Image } from "expo-image";
+import { useRouter } from "expo-router";
 import { Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -11,6 +12,7 @@ export default function HomeScreen() {
   const styles = useStyles();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { user, logout } = useAuth();
 
   const displayName = user?.nama || user?.username || user?.email || "Pengguna";
@@ -46,13 +48,24 @@ export default function HomeScreen() {
         </Text>
       </View>
 
-      <M3Button
-        testID="logout-button"
-        label="Keluar"
-        icon="logout"
-        variant="outlined"
-        onPress={logout}
-      />
+      <View style={{ gap: 12 }}>
+        {user?.role === "admin" ? (
+          <M3Button
+            testID="open-dashboard-button"
+            label="Buka Dashboard Admin"
+            icon="view-dashboard-outline"
+            variant="filled"
+            onPress={() => router.push("/dashboard")}
+          />
+        ) : null}
+        <M3Button
+          testID="logout-button"
+          label="Keluar"
+          icon="logout"
+          variant="outlined"
+          onPress={logout}
+        />
+      </View>
     </View>
   );
 }

@@ -13,6 +13,7 @@ import { M3Button } from "@/src/components/m3-button";
 import { M3TextField } from "@/src/components/m3-text-field";
 import { useAuth } from "@/src/context/auth";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
+import { resolveImageUrl } from "@/src/utils/image";
 
 type Profil = {
   nama_toko: string;
@@ -96,7 +97,7 @@ export default function LoginScreen() {
         {/* Banner + logo header */}
         <View style={styles.header}>
           <Image
-            source={{ uri: profil?.banner_url }}
+            source={{ uri: resolveImageUrl(profil?.banner_url) }}
             style={styles.banner}
             contentFit="cover"
             transition={300}
@@ -107,7 +108,7 @@ export default function LoginScreen() {
           />
           <View style={styles.logoWrap}>
             <View style={styles.logoRing}>
-              <Image source={{ uri: profil?.logo_url }} style={styles.logo} contentFit="cover" />
+              <Image source={{ uri: resolveImageUrl(profil?.logo_url) }} style={styles.logo} contentFit="cover" />
             </View>
           </View>
         </View>

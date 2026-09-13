@@ -1,0 +1,131 @@
+import MaterialDesignIcons from "@react-native-vector-icons/material-design-icons";
+import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "expo-router";
+import { Pressable, ScrollView, Text, View } from "react-native";
+
+import { apiRequest } from "@/src/api/client";
+import { fonts, makeStyles, useTheme } from "@/src/theme";
+
+type Stats = { produk: number; pelanggan: number; pending: number; pesanan: number };
+
+const SHORTCUTS: { route: string; label: string; icon: string }[] = [
+  { route: "/dashboard/produk", label: "Kelola Produk", icon: "tag-outline" },
+  { route: "/dashboard/pelanggan", label: "Kelola Pelanggan", icon: "account-group-outline" },
+  { route: "/dashboard/profil", label: "Pengaturan Toko", icon: "store-cog-outline" },
+];
+
+export default function DashboardHome() {
+  const styles = useStyles();
+  const { colors } = useTheme();
+  const router = useRouter();
+
+  const { data } = useQuery<Stats>({
+    queryKey: ["admin", "stats"],
+    queryFn: () => apiRequest<Stats>("/api/admin/stats"),
+  });
+
+  const cards = [
+    { label: "Produk", value: data?.produk ?? 0, icon: "tag-outline", color: colors.brandPrimary },
+    { label: "Pelanggan", value: data?.pelanggan ?? 0, icon: "account-group-outline", color: colors.info },
+    { label: "Menunggu Approval", value: data?.pending ?? 0, icon: "account-clock-outline", color: colors.warning },
+    { label: "Pesanan", value: data?.pesanan ?? 0, icon: "receipt-text-outline", color: colors.success },
+  ];
+
+  return (
+    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+      <Text style={styles.heading}>Ringkasan Toko</Text>
+      <View style={styles.grid}>
+        {cards.map((c) => (
+          <View key={c.label} style={styles.statCard} testID={`stat-${c.label}`}>
+            <View style={[styles.statIcon, { backgroundColor: c.color }]}>
+              <MaterialDesignIcons name={c.icon as any} size={22} color={colors.onBrandPrimary} />
+            </View>
+            <Text style={styles.statValue}>{c.value}</Text>
+            <Text style={styles.statLabel}>{c.label}</Text>
+          </View>
+        ))}
+      </View>
+
+      <Text style={styles.heading}>Aksi Cepat</Text>
+      <View style={{ gap: 12 }}>
+        {SHORTCUTS.map((s) => (
+          <Pressable
+            key={s.route}
+            testID={`shortcut-${s.label}`}
+            style={styles.shortcut}
+            onPress={() => router.push(s.route as any)}
+          >
+            <View style={styles.shortcutIcon}>
+              <MaterialDesignIcons name={s.icon as any} size={22} color={colors.onBrandTertiary} />
+            </View>
+            <Text style={styles.shortcutText}>{s.label}</Text>
+            <MaterialDesignIcons name="chevron-right" size={22} color={colors.muted} />
+          </Pressable>
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
+
+const useStyles = makeStyles((colors) => ({
+  root: { flex: 1, backgroundColor: colors.surface },
+  content: { padding: 20, gap: 16 },
+  heading: {
+    fontFamily: fonts.heading,
+    fontSize: 18,
+    color: colors.onSurface,
+    marginTop: 4,
+  },
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  statCard: {
+    width: "47%",
+    flexGrow: 1,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 20,
+    padding: 16,
+    gap: 8,
+  },
+  statIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statValue: {
+    fontFamily: fonts.heading,
+    fontSize: 26,
+    color: colors.onSurface,
+  },
+  statLabel: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.muted,
+  },
+  shortcut: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 16,
+    padding: 16,
+  },
+  shortcutIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  shortcutText: {
+    flex: 1,
+    fontFamily: fonts.bodyMedium,
+    fontSize: 15,
+    color: colors.onSurface,
+  },
+}));

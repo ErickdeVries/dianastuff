@@ -9,14 +9,18 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.dianastore.vwyidq"
+      "bundleIdentifier": "com.emergent.dianastore.vwyidq",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Pilih foto produk dan banner toko"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.emergent.dianastore.vwyidq"
+      "package": "com.emergent.dianastore.vwyidq",
+      "permissions": ["READ_MEDIA_IMAGES"]
     },
     "web": {
       "bundler": "metro",
@@ -39,7 +43,13 @@
       "expo-secure-store",
       "expo-web-browser",
       "expo-status-bar",
-      "@react-native-vector-icons/material-design-icons"
+      "@react-native-vector-icons/material-design-icons",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Pilih foto produk dan banner toko"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
