@@ -416,6 +416,42 @@ async def logout(authorization: Optional[str] = Header(None)):
     return {"message": "Berhasil keluar"}
 
 
+class ChangePassword(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@api_router.post("/auth/change-password")
+async def change_password(payload: ChangePassword, authorization: Optional[str] = Header(None)):
+    """Change the logged-in user's own password.
+
+    Verifies the old password, validates the new one, replaces the bcrypt hash,
+    then revokes ALL existing sessions and returns a fresh rotated token.
+    """
+    user = await get_current_user(authorization)
+    if not payload.old_password or not payload.new_password:
+        raise HTTPException(status_code=400, detail="Sandi lama dan baru wajib diisi")
+    if len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Kata sandi baru minimal 6 karakter")
+    if payload.old_password == payload.new_password:
+        raise HTTPException(status_code=400, detail="Kata sandi baru harus berbeda dari yang lama")
+
+    full = await db.users.find_one({"user_id": user["user_id"]})
+    if not full or not full.get("password_hash"):
+        raise HTTPException(status_code=400, detail="Akun ini tidak memakai kata sandi")
+    if not verify_password(payload.old_password, full["password_hash"]):
+        raise HTTPException(status_code=401, detail="Kata sandi lama salah")
+
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"password_hash": hash_password(payload.new_password)}},
+    )
+    # Revoke every existing session (including this one) and rotate.
+    await db.user_sessions.delete_many({"user_id": user["user_id"]})
+    new_token = await create_session(user["user_id"])
+    return {"session_token": new_token, "message": "Kata sandi berhasil diubah"}
+
+
 # ---------------------------------------------------------------------------
 # Uploads / file serving (Emergent Object Storage)
 # ---------------------------------------------------------------------------

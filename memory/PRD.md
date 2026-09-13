@@ -101,6 +101,10 @@ Inter body. Language: Indonesian.
   hanya muncul jika ada riwayat navigasi. Bottom bar /produk/[id]: ikon chat -> /chat, ikon
   keranjang (tambah ke keranjang + toast), tombol besar "Beli Sekarang <harga*qty>" -> add +
   /checkout. Stepper jumlah pindah ke area info produk.
+- Ubah kata sandi sendiri: POST /api/auth/change-password (verifikasi sandi lama, min 6, beda
+  dari lama, rotasi semua sesi -> token baru). Layar /dashboard/sandi (drawer "Kata Sandi").
+- Branding: tulisan "Diana Stuff" (login + drawer) warna soft purple (brandPrimary #A855F7),
+  font Poppins-SemiBold (tegas).
 
 
 ## Next Tasks

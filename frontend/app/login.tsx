@@ -285,7 +285,7 @@ const useStyles = makeStyles((colors) => ({
   storeName: {
     fontFamily: fonts.heading,
     fontSize: 24,
-    color: colors.onSurface,
+    color: colors.brandPrimary,
     textAlign: "center",
   },
   tagline: {

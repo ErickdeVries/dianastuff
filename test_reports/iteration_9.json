@@ -1,0 +1,37 @@
+{
+  "summary": "CHANGE-PASSWORD FEATURE + BRAND COLOR FULLY VERIFIED (backend 14/14 pytest, frontend ~20 UI checks, all pass). Backend POST /api/auth/change-password: empty fields 400, new<6 chars 400 ('minimal 6 karakter'), same-as-old 400 ('harus berbeda'), wrong old 401 ('Kata sandi lama salah'), success returns rotated session_token with message 'Kata sandi berhasil diubah', ALL old sessions revoked (2 pre-existing tokens both 401 on /auth/me), new token valid, old password login rejected, new password login accepted. Frontend: /login store-name computed style = rgb(168, 85, 247) Poppins-SemiBold (soft purple, bold look) — PASS; admin drawer brand title 'Diana Stuff' also rgb(168, 85, 247) Poppins-SemiBold — PASS; new drawer item 'Kata Sandi' (drawer-sandi) renders with shield-key icon and navigates to /dashboard/sandi; all 4 client validations show correct Indonesian errors via password-error testID; wrong-old-password surfaces backend 401 message in UI; success flow via UI shows green toast 'Kata sandi berhasil diubah', clears all 3 fields, persists rotated token (dashboard still accessible after full page reload — session persistence verified); old password UI login rejected with 'Username atau password salah', new password UI login lands on /home. Password changed to temp via UI then RESTORED to admin123 via UI (toast confirmed); final curl confirms admin/admin123 and buyer/buyer123 both login 200. Regression: buyer whitelist login lands on /toko, buyer+admin logout work, Google tab/button unaffected. INCIDENT FOUND & FIXED (data, not code): the seeded 'buyer' account had deleted_at set (soft-deleted by an earlier admin-customer test), causing buyer login 401 — restored deleted_at=null/status=approved in MongoDB; buyer regression now passes.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_change_password.py",
+    "/app/test_reports/pytest/pytest_change_password.xml",
+    "/app/test_reports/screenshots/iter9_sandi_loaded.png",
+    "/app/test_reports/screenshots/iter9_sandi_success.png",
+    "/app/test_reports/screenshots/iter9_drawer.png",
+    "/app/test_reports/screenshots/iter9_dashboard_persist.png"
+  ],
+  "action_items": [
+    "No blocking issues — feature complete and verified end-to-end.",
+    "Caution for future tests: admin 'Pelanggan' delete flow soft-deletes users; never delete the seeded 'buyer' account (it broke buyer123 login until restored).",
+    "Optional: Playwright web cannot rely on a stable hamburger selector (react-navigation renders it as aria-label 'Show navigation menu'); coordinate click works. Consider adding testID to drawer toggle for future automation."
+  ],
+  "critical_code_review_comments": [
+    "server.py change-password: correct order of checks, bcrypt verify against fresh DB doc, delete_many revokes ALL user sessions then rotates token — verified live.",
+    "sandi.tsx: onSuccess persists rotated token via persistToken before clearing fields — verified session survives reload. Client-side validations match backend messages.",
+    "Brand color uses colors.brandPrimary (single theme token) — change propagates consistently to login store-name, drawer brand title, and accent UI (verified rgb(168, 85, 247) in both places).",
+    "No deprecated Expo packages in reviewed files; no HTML elements; all interactive elements have testIDs.",
+    "Dashboard drawer hamburger on web is react-navigation's default toggle (aria-label 'Show navigation menu'), no testID — testability nit only."
+  ],
+  "updated_files": ["MongoDB: users{buyer}.deleted_at=null, status=approved (restored soft-deleted seeded account)"],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100% (~20 checks across 4 Playwright scripts)"},
+  "seed_data_creation": "Restored soft-deleted seeded buyer account. Admin password cycled admin123 -> TEST_newpass789 -> admin123 (pytest) and admin123 -> UITest2026x -> admin123 (UI); final state verified admin123.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Admin home button testID is 'open-dashboard-button' (not dashboard-button). Drawer hamburger: click coordinates (25,33) at 375x667 viewport or aria-label 'Show navigation menu'. M3TextField: fill '[data-testid=\"<containerTestID>\"] input'. password-error testID only exists when error visible. After UI password change, frontend persists rotated token so session survives reload. Fetch('/api/auth/me') without Authorization header returns 401 — token lives in localStorage, not cookies. If buyer/buyer123 ever 401s, check deleted_at in Mongo first (soft-delete hazard).",
+  "rca_of_issue": "Buyer login regression failure: login-whitelist filters deleted_at=None; the seeded buyer doc had deleted_at set (soft-deleted, most likely by a previous admin-customer management test). Hash still matched buyer123. Mitigation: restored deleted_at=null; recommend tests avoid deleting seeded accounts or restore them in teardown."
+}

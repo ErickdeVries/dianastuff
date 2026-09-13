@@ -18,6 +18,7 @@ const ITEMS: Item[] = [
   { name: "ongkir", label: "Ongkir Manual", icon: "truck-outline" },
   { name: "pelanggan", label: "Pelanggan", icon: "account-group-outline" },
   { name: "profil", label: "Pengaturan Toko", icon: "store-cog-outline" },
+  { name: "sandi", label: "Kata Sandi", icon: "shield-key-outline" },
   { name: "chat", label: "Chat", icon: "chat-outline" },
 ];
 
@@ -129,6 +130,7 @@ export default function DashboardLayout() {
       <Drawer.Screen name="ongkir" options={{ title: "Ongkir Manual" }} />
       <Drawer.Screen name="pelanggan" options={{ title: "Pelanggan" }} />
       <Drawer.Screen name="profil" options={{ title: "Pengaturan Toko" }} />
+      <Drawer.Screen name="sandi" options={{ title: "Ubah Kata Sandi" }} />
       <Drawer.Screen name="chat" options={{ title: "Chat" }} />
     </Drawer>
   );
@@ -157,7 +159,7 @@ const useStyles = makeStyles((colors) => ({
   brandTitle: {
     fontFamily: fonts.heading,
     fontSize: 18,
-    color: colors.onSurface,
+    color: colors.brandPrimary,
   },
   brandSub: {
     fontFamily: fonts.body,
