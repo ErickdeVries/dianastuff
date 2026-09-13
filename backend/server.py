@@ -12,6 +12,7 @@ import secrets
 import bcrypt
 import httpx
 import requests
+import socketio
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -28,6 +29,9 @@ db = client[os.environ['DB_NAME']]
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
+
+# Socket.IO server (mounted at /api/socket.io via ASGIApp at the bottom of file).
+sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -617,10 +621,12 @@ def order_public(o: dict) -> dict:
         "ongkir": o.get("ongkir", 0),
         "total": o.get("total", 0),
         "status": o.get("status"),
+        "no_resi": o.get("no_resi"),
         "alamat": o.get("alamat"),
         "kurir": o.get("kurir"),
         "catatan": o.get("catatan"),
         "bukti_bayar_url": o.get("bukti_bayar_url"),
+        "review": o.get("review"),
         "created_at": o.get("created_at").isoformat() if o.get("created_at") else None,
     }
 
@@ -761,6 +767,138 @@ async def set_bukti_bayar(order_id: str, body: dict, user: dict = Depends(get_cu
     return order_public(updated)
 
 
+@api_router.post("/orders/{order_id}/konfirmasi-bayar")
+async def konfirmasi_bayar(order_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.orders.find_one({"id": order_id, "deleted_at": None})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
+    if user.get("role") != "admin" and doc.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    await db.orders.update_one({"id": order_id}, {"$set": {"status": "menunggu_konfirmasi"}})
+    updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    return order_public(updated)
+
+
+ALLOWED_STATUS = {"menunggu_pembayaran", "menunggu_konfirmasi", "sedang_dikemas", "dikirim", "selesai", "dibatalkan"}
+
+
+@api_router.put("/orders/{order_id}/status")
+async def update_order_status(order_id: str, body: dict, admin: dict = Depends(require_admin)):
+    status = (body or {}).get("status")
+    if status not in ALLOWED_STATUS:
+        raise HTTPException(status_code=400, detail="Status tidak valid")
+    doc = await db.orders.find_one({"id": order_id, "deleted_at": None})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
+    update: dict = {"status": status}
+    if status == "dikirim":
+        no_resi = (body or {}).get("no_resi")
+        if not no_resi or not str(no_resi).strip():
+            raise HTTPException(status_code=400, detail="No resi wajib diisi")
+        update["no_resi"] = str(no_resi).strip()
+    # Admin may set/adjust ongkir (manual) when packing.
+    if body.get("ongkir") is not None:
+        ongkir = max(0.0, float(body["ongkir"]))
+        update["ongkir"] = ongkir
+        update["total"] = doc.get("subtotal", 0) + ongkir
+    await db.orders.update_one({"id": order_id}, {"$set": update})
+    updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    return order_public(updated)
+
+
+@api_router.post("/orders/{order_id}/review")
+async def review_order(order_id: str, body: dict, user: dict = Depends(get_current_user)):
+    rating = int((body or {}).get("rating", 0))
+    if rating < 1 or rating > 5:
+        raise HTTPException(status_code=400, detail="Rating 1-5")
+    doc = await db.orders.find_one({"id": order_id, "deleted_at": None})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
+    if doc.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {"review": {"rating": rating, "komentar": (body or {}).get("komentar", ""), "created_at": datetime.now(timezone.utc)}}},
+    )
+    updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    return order_public(updated)
+
+
+# ---------------------------------------------------------------------------
+# Chat (REST history/rooms; realtime via Socket.IO below)
+# ---------------------------------------------------------------------------
+def chat_public(m: dict) -> dict:
+    return {
+        "id": m.get("id"),
+        "room": m.get("room"),
+        "sender_id": m.get("sender_id"),
+        "sender_role": m.get("sender_role"),
+        "sender_nama": m.get("sender_nama"),
+        "text": m.get("text"),
+        "image_url": m.get("image_url"),
+        "created_at": m.get("created_at").isoformat() if m.get("created_at") else None,
+    }
+
+
+@api_router.get("/chat/history")
+async def chat_history(room: Optional[str] = None, user: dict = Depends(get_current_user)):
+    target = room if user.get("role") == "admin" and room else user["user_id"]
+    docs = await db.chats.find({"room": target}, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    return [chat_public(d) for d in docs]
+
+
+@api_router.get("/chat/rooms")
+async def chat_rooms(admin: dict = Depends(require_admin)):
+    pipeline = [
+        {"$sort": {"created_at": -1}},
+        {"$group": {"_id": "$room", "last": {"$first": "$$ROOT"}}},
+    ]
+    rooms = []
+    async for g in db.chats.aggregate(pipeline):
+        last = g["last"]
+        buyer = await db.users.find_one({"user_id": g["_id"]}, {"_id": 0})
+        rooms.append({
+            "room": g["_id"],
+            "nama": (buyer or {}).get("nama") or (buyer or {}).get("username") or "Pembeli",
+            "last_text": last.get("text") or ("[Gambar]" if last.get("image_url") else ""),
+            "last_at": last.get("created_at").isoformat() if last.get("created_at") else None,
+        })
+    rooms.sort(key=lambda r: r.get("last_at") or "", reverse=True)
+    return rooms
+
+
+async def save_chat_message(room: str, sender: dict, text: Optional[str], image_url: Optional[str]) -> dict:
+    doc = {
+        "id": uuid.uuid4().hex,
+        "room": room,
+        "sender_id": sender["user_id"],
+        "sender_role": sender.get("role", "buyer"),
+        "sender_nama": sender.get("nama") or sender.get("username"),
+        "text": text,
+        "image_url": image_url,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.chats.insert_one(doc)
+    return doc
+
+
+@api_router.post("/chat/send")
+async def chat_send(body: dict, user: dict = Depends(get_current_user)):
+    room = body.get("room") if user.get("role") == "admin" else user["user_id"]
+    if not room:
+        raise HTTPException(status_code=400, detail="Room diperlukan")
+    text = (body or {}).get("text")
+    image_url = (body or {}).get("image_url")
+    if not text and not image_url:
+        raise HTTPException(status_code=400, detail="Pesan kosong")
+    doc = await save_chat_message(room, user, text, image_url)
+    payload = chat_public(doc)
+    await sio.emit("message", payload, room=room)
+    return payload
+
+
+
+
 # ---------------------------------------------------------------------------
 # Dashboard stats — admin only
 # ---------------------------------------------------------------------------
@@ -862,6 +1000,48 @@ async def on_startup():
         })
         logger.info("Seeded buyer user")
 
+    # Seed 3 sample baju products (only when catalog is empty).
+    if await db.products.count_documents({"deleted_at": None}) == 0:
+        samples = [
+            {
+                "kategori": "Baju",
+                "nama_produk": "Blouse Katun Premium",
+                "deskripsi": "Blouse katun adem, nyaman dipakai harian.",
+                "harga": 89000,
+                "stok": 20,
+                "berat_gram": 250,
+                "bisa_po": False,
+                "foto_urls": ["https://images.unsplash.com/photo-1554568218-0f1715e72254?crop=entropy&cs=srgb&fm=jpg&q=85&w=800"],
+            },
+            {
+                "kategori": "Baju",
+                "nama_produk": "Dress Floral Musim Panas",
+                "deskripsi": "Dress motif bunga, bahan ringan dan flowy.",
+                "harga": 159000,
+                "stok": 12,
+                "berat_gram": 350,
+                "bisa_po": True,
+                "foto_urls": ["https://images.unsplash.com/photo-1595777457583-95e059d581b8?crop=entropy&cs=srgb&fm=jpg&q=85&w=800"],
+            },
+            {
+                "kategori": "Baju",
+                "nama_produk": "Kemeja Oversize Unisex",
+                "deskripsi": "Kemeja oversize kekinian, cocok untuk gaya kasual.",
+                "harga": 119000,
+                "stok": 15,
+                "berat_gram": 300,
+                "bisa_po": False,
+                "foto_urls": ["https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?crop=entropy&cs=srgb&fm=jpg&q=85&w=800"],
+            },
+        ]
+        for s in samples:
+            s["id"] = uuid.uuid4().hex
+            s["created_at"] = datetime.now(timezone.utc)
+            s["deleted_at"] = None
+        await db.products.insert_many(samples)
+        logger.info("Seeded sample products")
+
+
 
 app.include_router(api_router)
 
@@ -877,3 +1057,65 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+
+# ---------------------------------------------------------------------------
+# Socket.IO realtime chat handlers + combined ASGI app
+# ---------------------------------------------------------------------------
+async def _user_from_token(token: Optional[str]) -> Optional[dict]:
+    if not token:
+        return None
+    session = await db.user_sessions.find_one({"session_token": token})
+    if not session:
+        return None
+    return await db.users.find_one({"user_id": session["user_id"], "deleted_at": None}, {"_id": 0})
+
+
+@sio.event
+async def connect(sid, environ, auth):
+    token = None
+    if isinstance(auth, dict):
+        token = auth.get("token")
+    if not token:
+        qs = environ.get("QUERY_STRING", "")
+        for part in qs.split("&"):
+            if part.startswith("token="):
+                token = part.split("=", 1)[1]
+    user = await _user_from_token(token)
+    if not user:
+        return False
+    await sio.save_session(sid, {
+        "user_id": user["user_id"],
+        "role": user.get("role", "buyer"),
+        "nama": user.get("nama") or user.get("username"),
+        "username": user.get("username"),
+    })
+    return True
+
+
+@sio.event
+async def join(sid, data):
+    session = await sio.get_session(sid)
+    room = (data or {}).get("room") or session["user_id"]
+    if session["role"] != "admin" and room != session["user_id"]:
+        return
+    await sio.enter_room(sid, room)
+
+
+@sio.event
+async def message(sid, data):
+    session = await sio.get_session(sid)
+    room = (data or {}).get("room") if session["role"] == "admin" else session["user_id"]
+    if not room:
+        return
+    text = (data or {}).get("text")
+    image_url = (data or {}).get("image_url")
+    if not text and not image_url:
+        return
+    doc = await save_chat_message(room, session, text, image_url)
+    await sio.emit("message", chat_public(doc), room=room)
+
+
+# Wrap FastAPI with Socket.IO. Uvicorn serves this combined `app`.
+app = socketio.ASGIApp(sio, other_asgi_app=app, socketio_path="api/socket.io")
+

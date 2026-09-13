@@ -73,6 +73,20 @@ export default function HomeScreen() {
               variant="tonal"
               onPress={() => router.push("/pesanan-saya")}
             />
+            <M3Button
+              testID="chat-button"
+              label="Chat Admin"
+              icon="chat-outline"
+              variant="tonal"
+              onPress={() => router.push("/chat")}
+            />
+            <M3Button
+              testID="webview-button"
+              label="Toko (Versi Web)"
+              icon="web"
+              variant="outlined"
+              onPress={() => router.push({ pathname: "/webview", params: { path: "/toko", title: "Toko Diana (Web)" } })}
+            />
           </>
         )}
         <M3Button

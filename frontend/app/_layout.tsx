@@ -12,6 +12,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/src/components/error-boundary";
 import { AuthProvider, useAuth } from "@/src/context/auth";
 import { CartProvider } from "@/src/context/cart";
+import { ToastProvider } from "@/src/context/toast";
 import { queryClient } from "@/src/query-client";
 import { useTheme } from "@/src/theme";
 
@@ -33,8 +34,11 @@ function RootNav() {
 
   useEffect(() => {
     if (loading) return;
-    const inAuthGroup = segments[0] === "login" || segments[0] === "register";
-    if (!user && !inAuthGroup) {
+    const root = segments[0];
+    const inAuthGroup = root === "login" || root === "register";
+    // Guests may browse the storefront + webview; everything else needs auth.
+    const publicGroup = root === "toko" || root === "produk" || root === "webview";
+    if (!user && !inAuthGroup && !publicGroup) {
       router.replace("/login");
     } else if (user && inAuthGroup) {
       router.replace("/home");
@@ -67,8 +71,10 @@ export default function RootLayout() {
             <QueryClientProvider client={queryClient}>
               <AuthProvider>
                 <CartProvider>
-                  <RootNav />
-                  <StatusBar style="dark" />
+                  <ToastProvider>
+                    <RootNav />
+                    <StatusBar style="dark" />
+                  </ToastProvider>
                 </CartProvider>
               </AuthProvider>
             </QueryClientProvider>

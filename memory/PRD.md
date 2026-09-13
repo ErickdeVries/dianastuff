@@ -55,12 +55,21 @@ Inter body. Language: Indonesian.
   /pesanan-saya + /order/[id] (upload bukti bayar, konfirmasi via WhatsApp).
 - Verified by testing agent three times: auth (12/12), admin dashboard (26/26), buyer shopping
   (20/20) — no bugs.
+- Finalization (2026-09-13): Order lifecycle + Shopee-style status stepper on /order/[id]
+  (Menunggu Pembayaran > Sedang Dikemas > Dikirim > Selesai > Beri Ulasan); Konfirmasi
+  Pembayaran via WhatsApp (POST konfirmasi-bayar -> menunggu_konfirmasi); admin manajemen
+  pesanan /dashboard/pesanan (PUT status: proses, input resi -> dikirim, selesai; lihat bukti);
+  Toast global untuk perubahan status; review order (rating 1-5). Chat realtime Socket.IO
+  (/api/socket.io) di /chat (buyer) + /dashboard/chat (admin rooms), teks + gambar. WebView
+  /webview (iframe di web, react-native-webview di native). Guest boleh lihat /toko + /produk.
+  Seed: profil WA 628123456789, rekening BCA/123/Diana, 3 produk baju, admin + buyer. README.md.
+- Verified by testing agent (finalization): backend 25/25 + frontend flows — no bugs.
 
 ## Backlog (prioritized)
-- **P1**: Kelola Pesanan untuk admin (update status, input ongkir manual saat "Sedang Dikemas").
-- **P1**: Admin input ongkir_manual dari UI (sekarang lewat DB).
-- **P2**: In-app chat buyer ↔ admin (placeholder saat ini).
+- **P1**: Admin input ongkir_manual dari UI (sekarang lewat DB / hanya baca saat checkout).
 - **P2**: Kurir otomatis (RajaOngkir/dsb) menggantikan ongkir manual.
+- **P2**: Push notification saat status pesanan berubah (butuh build device).
+- **P3**: Refactor server.py jadi modul + Pydantic models untuk body dict.
 
 ## Next Tasks
 1. Admin approval dashboard.
