@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.dianastore.vwyidq",
+      "bundleIdentifier": "com.dianastuff.app",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Pilih foto produk dan banner toko"
       }
@@ -19,7 +19,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.emergent.dianastore.vwyidq",
+      "package": "com.dianastuff.app",
       "permissions": ["READ_MEDIA_IMAGES"]
     },
     "web": {
