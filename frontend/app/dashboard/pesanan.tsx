@@ -12,6 +12,9 @@ import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { formatRupiah, formatDate } from "@/src/utils/format";
 import { resolveImageUrl } from "@/src/utils/image";
 import { STATUS_LABEL } from "@/src/utils/order";
+import { printShippingLabel } from "@/src/utils/shipping-label";
+
+type Profil = { nama_toko?: string; whatsapp?: string };
 
 type Order = {
   id: string;
@@ -20,7 +23,7 @@ type Order = {
   status: string;
   no_resi?: string | null;
   kurir?: string;
-  alamat: { nama?: string; kota?: string };
+  alamat: { nama?: string; wa?: string; alamat?: string; kota?: string; kode_pos?: string };
   items: { nama_produk: string; qty: number }[];
   bukti_bayar_url?: string | null;
   created_at?: string | null;
@@ -50,6 +53,31 @@ export default function AdminPesananScreen() {
     queryFn: () => apiRequest<Order[]>("/api/orders"),
   });
 
+  const { data: profil } = useQuery<Profil>({
+    queryKey: ["profil_admin"],
+    queryFn: () => apiRequest<Profil>("/api/profil_admin", { auth: false }),
+  });
+
+  const onPrint = async (item: Order) => {
+    try {
+      await printShippingLabel({
+        no_order: item.no_order,
+        nama_toko: profil?.nama_toko,
+        toko_wa: profil?.whatsapp,
+        penerima: item.alamat?.nama,
+        wa: item.alamat?.wa,
+        alamat: item.alamat?.alamat,
+        kota: item.alamat?.kota,
+        kode_pos: item.alamat?.kode_pos,
+        kurir: item.kurir,
+        no_resi: item.no_resi,
+        items: item.items,
+      });
+    } catch {
+      toast.show("Gagal membuka print", "error");
+    }
+  };
+
   const statusMut = useMutation({
     mutationFn: (vars: { id: string; status: string; no_resi?: string }) =>
       apiRequest(`/api/orders/${vars.id}/status`, { method: "PUT", body: { status: vars.status, no_resi: vars.no_resi } }),
@@ -73,6 +101,20 @@ export default function AdminPesananScreen() {
         <Text style={styles.meta}>{totalQty} item · {formatRupiah(item.total)}</Text>
         {item.created_at ? <Text style={styles.meta}>{formatDate(item.created_at)}</Text> : null}
 
+        {/* Product names */}
+        <View style={styles.produkBox}>
+          {item.items.map((it, i) => (
+            <Text key={i} style={styles.produkLine} numberOfLines={1}>• {it.nama_produk} ({it.qty}x)</Text>
+          ))}
+        </View>
+
+        {/* Full shipping address */}
+        <View style={styles.addrBox}>
+          <Text style={styles.addrName}>{item.alamat?.nama}{item.alamat?.wa ? ` · ${item.alamat.wa}` : ""}</Text>
+          {item.alamat?.alamat ? <Text style={styles.addrText}>{item.alamat.alamat}</Text> : null}
+          <Text style={styles.addrText}>{item.alamat?.kota} {item.alamat?.kode_pos ?? ""}</Text>
+        </View>
+
         {item.bukti_bayar_url ? (
           <Pressable testID={`view-bukti-${item.id}`} onPress={() => setViewBukti(item.bukti_bayar_url!)} style={styles.buktiRow}>
             <Image source={{ uri: resolveImageUrl(item.bukti_bayar_url) }} style={styles.buktiThumb} contentFit="cover" />
@@ -80,7 +122,17 @@ export default function AdminPesananScreen() {
           </Pressable>
         ) : null}
 
-        {item.no_resi ? <Text style={styles.meta}>Resi ({item.kurir}): {item.no_resi}</Text> : null}
+        {item.no_resi ? <Text style={styles.meta}>Resi{item.kurir ? ` (${item.kurir})` : ""}: {item.no_resi}</Text> : null}
+
+        {item.status === "sedang_dikemas" || item.status === "dikirim" ? (
+          <M3Button
+            testID={`print-label-${item.id}`}
+            label="Cetak / Preview Label Alamat"
+            icon="printer-outline"
+            variant="tonal"
+            onPress={() => onPrint(item)}
+          />
+        ) : null}
 
         {/* Contextual actions */}
         {item.status === "menunggu_konfirmasi" ? (
@@ -232,6 +284,19 @@ const useStyles = makeStyles((colors) => ({
     overflow: "hidden",
   },
   meta: { fontFamily: fonts.body, fontSize: 13, color: colors.muted },
+  produkBox: {
+    marginTop: 4,
+    gap: 2,
+  },
+  produkLine: { fontFamily: fonts.bodyMedium, fontSize: 13, color: colors.onSurface },
+  addrBox: {
+    marginTop: 6,
+    backgroundColor: colors.surfaceTertiary,
+    borderRadius: 12,
+    padding: 10,
+  },
+  addrName: { fontFamily: fonts.bodyMedium, fontSize: 13, color: colors.onSurface },
+  addrText: { fontFamily: fonts.body, fontSize: 12, color: colors.onSurfaceTertiary, marginTop: 1 },
   buktiRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   buktiThumb: { width: 44, height: 44, borderRadius: 8, backgroundColor: colors.surfaceTertiary },
   linkText: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.brandPrimary },

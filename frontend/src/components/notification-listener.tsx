@@ -66,6 +66,13 @@ export function NotificationListener() {
       toast.show(`Pesanan baru ${order.no_order ?? ""}`.trim(), "info");
     });
 
+    on("order_received", (order: any) => {
+      if (user.role !== "admin" || !order) return;
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "stats"] });
+      toast.show(`Paket ${order.no_order ?? ""} sudah diterima ${order.nama ?? "pembeli"}`.trim(), "success");
+    });
+
     on("order_status", (order: any) => {
       if (user.role === "admin" || !order) return;
       queryClient.invalidateQueries({ queryKey: ["orders"] });

@@ -105,6 +105,18 @@ Inter body. Language: Indonesian.
   dari lama, rotasi semua sesi -> token baru). Layar /dashboard/sandi (drawer "Kata Sandi").
 - Branding: tulisan "Diana Stuff" (login + drawer) warna soft purple (brandPrimary #A855F7),
   font Poppins-SemiBold (tegas).
+- Penyempurnaan flow pesanan + label kirim:
+  - Kartu pesanan admin kini menampilkan daftar nama produk + alamat lengkap penerima
+    (nama, wa, alamat, kota, kode pos) — sebelumnya hanya nama & kota.
+  - Cetak/preview label alamat: tombol "Cetak / Preview Label Alamat" (status sedang_dikemas
+    & dikirim) via expo-print (`src/utils/shipping-label.ts`, buildLabelHtml + printShippingLabel);
+    buka print dialog native (iOS/Android) atau browser (web). Berisi toko, no order, penerima,
+    alamat, kurir, resi, isi paket.
+  - Konfirmasi terima paket oleh pembeli: POST /api/orders/{id}/terima (owner, hanya saat status
+    'dikirim' -> 'selesai'); tombol "Pesanan Sudah Diterima" di /order/[id] saat status dikirim.
+    Backend emit socket "order_received" ke room "admins" -> NotificationListener admin munculkan
+    toast "Paket <no> sudah diterima <nama>" + refresh list. Admin tetap punya "Tandai Selesai"
+    sebagai fallback.
 
 
 ## Next Tasks

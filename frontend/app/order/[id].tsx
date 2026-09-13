@@ -91,6 +91,16 @@ export default function OrderDetail() {
     },
   });
 
+  const confirmReceipt = useMutation({
+    mutationFn: () => apiRequest(`/api/orders/${id}/terima`, { method: "POST" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["order", id] });
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      toast.show("Terima kasih! Pesanan selesai", "success");
+    },
+    onError: (e: any) => toast.show(e?.message || "Gagal konfirmasi", "error"),
+  });
+
   const onUpload = async () => {
     setUploading(true);
     try {
@@ -264,6 +274,15 @@ export default function OrderDetail() {
             variant="fab"
             loading={confirmPay.isPending}
             onPress={confirmPayment}
+          />
+        ) : order?.status === "dikirim" ? (
+          <M3Button
+            testID="confirm-receipt"
+            label="Pesanan Sudah Diterima"
+            icon="package-variant-closed-check"
+            variant="filled"
+            loading={confirmReceipt.isPending}
+            onPress={() => confirmReceipt.mutate()}
           />
         ) : canReview ? (
           <M3Button testID="give-review" label="Beri Ulasan" icon="star-outline" variant="filled" onPress={() => setReviewOpen(true)} />

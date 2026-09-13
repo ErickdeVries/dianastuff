@@ -903,6 +903,34 @@ async def konfirmasi_bayar(order_id: str, user: dict = Depends(get_current_user)
     return order_public(updated)
 
 
+@api_router.post("/orders/{order_id}/terima")
+async def konfirmasi_terima(order_id: str, user: dict = Depends(get_current_user)):
+    """Buyer confirms they received the package -> order becomes 'selesai'.
+
+    This is how the seller learns the parcel arrived: an admin notification is
+    emitted in realtime.
+    """
+    doc = await db.orders.find_one({"id": order_id, "deleted_at": None})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
+    if user.get("role") != "admin" and doc.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    if doc.get("status") != "dikirim":
+        raise HTTPException(status_code=400, detail="Pesanan belum dikirim")
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {"status": "selesai"}, "$push": {"status_history": {"status": "selesai", "at": datetime.now(timezone.utc)}}},
+    )
+    updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    # Let the seller know the parcel has been received.
+    await sio.emit(
+        "order_received",
+        {"id": updated.get("id"), "no_order": updated.get("no_order"), "nama": (updated.get("alamat") or {}).get("nama")},
+        room="admins",
+    )
+    return order_public(updated)
+
+
 ALLOWED_STATUS = {"menunggu_pembayaran", "menunggu_konfirmasi", "sedang_dikemas", "dikirim", "selesai", "dibatalkan"}
 
 
