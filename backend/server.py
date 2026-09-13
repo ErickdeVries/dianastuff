@@ -1021,7 +1021,34 @@ async def admin_stats(admin: dict = Depends(require_admin)):
     pelanggan = await db.users.count_documents({"role": "buyer", "deleted_at": None})
     pending = await db.users.count_documents({"role": "buyer", "status": "pending", "deleted_at": None})
     pesanan = await db.orders.count_documents({"deleted_at": None})
-    return {"produk": produk, "pelanggan": pelanggan, "pending": pending, "pesanan": pesanan}
+
+    # Sales totals (paid orders only) in WIB day/month boundaries.
+    wib = timezone(timedelta(hours=7))
+    now_wib = datetime.now(wib)
+    start_today = now_wib.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_month = now_wib.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    paid_statuses = ["menunggu_konfirmasi", "sedang_dikemas", "dikirim", "selesai"]
+
+    async def sum_sales(since: datetime) -> float:
+        pipeline = [
+            {"$match": {
+                "deleted_at": None,
+                "status": {"$in": paid_statuses},
+                "created_at": {"$gte": since},
+            }},
+            {"$group": {"_id": None, "total": {"$sum": "$total"}}},
+        ]
+        res = await db.orders.aggregate(pipeline).to_list(1)
+        return res[0]["total"] if res else 0
+
+    return {
+        "produk": produk,
+        "pelanggan": pelanggan,
+        "pending": pending,
+        "pesanan": pesanan,
+        "penjualan_hari_ini": await sum_sales(start_today),
+        "penjualan_bulan_ini": await sum_sales(start_month),
+    }
 
 
 

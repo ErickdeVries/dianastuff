@@ -5,8 +5,16 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { apiRequest } from "@/src/api/client";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
+import { formatRupiah } from "@/src/utils/format";
 
-type Stats = { produk: number; pelanggan: number; pending: number; pesanan: number };
+type Stats = {
+  produk: number;
+  pelanggan: number;
+  pending: number;
+  pesanan: number;
+  penjualan_hari_ini: number;
+  penjualan_bulan_ini: number;
+};
 
 const SHORTCUTS: { route: string; label: string; icon: string }[] = [
   { route: "/dashboard/produk", label: "Kelola Produk", icon: "tag-outline" },
@@ -33,6 +41,24 @@ export default function DashboardHome() {
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+      <Text style={styles.heading}>Ringkasan Penjualan</Text>
+      <View style={styles.grid}>
+        <View style={styles.statCard} testID="stat-penjualan-hari-ini">
+          <View style={[styles.statIcon, { backgroundColor: colors.success }]}>
+            <MaterialDesignIcons name="cash-multiple" size={22} color={colors.onSuccess} />
+          </View>
+          <Text style={styles.statValueSales}>{formatRupiah(data?.penjualan_hari_ini ?? 0)}</Text>
+          <Text style={styles.statLabel}>Penjualan Hari Ini</Text>
+        </View>
+        <View style={styles.statCard} testID="stat-penjualan-bulan-ini">
+          <View style={[styles.statIcon, { backgroundColor: colors.info }]}>
+            <MaterialDesignIcons name="calendar-month-outline" size={22} color={colors.onInfo} />
+          </View>
+          <Text style={styles.statValueSales}>{formatRupiah(data?.penjualan_bulan_ini ?? 0)}</Text>
+          <Text style={styles.statLabel}>Penjualan Bulan Ini</Text>
+        </View>
+      </View>
+
       <Text style={styles.heading}>Ringkasan Toko</Text>
       <View style={styles.grid}>
         {cards.map((c) => (
@@ -99,6 +125,11 @@ const useStyles = makeStyles((colors) => ({
   statValue: {
     fontFamily: fonts.heading,
     fontSize: 26,
+    color: colors.onSurface,
+  },
+  statValueSales: {
+    fontFamily: fonts.heading,
+    fontSize: 20,
     color: colors.onSurface,
   },
   statLabel: {

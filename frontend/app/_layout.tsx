@@ -40,7 +40,8 @@ function RootNav() {
     const publicGroup = root === "toko" || root === "produk" || root === "webview";
     if (!user && !inAuthGroup && !publicGroup) {
       router.replace("/login");
-    } else if (user && inAuthGroup) {
+    } else if (user && (inAuthGroup || !root)) {
+      // After a Google OAuth redirect the user lands back on "/" — route them in.
       router.replace("/home");
     }
   }, [user, loading, segments, router]);

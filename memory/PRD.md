@@ -76,6 +76,11 @@ Inter body. Language: Indonesian.
   hapus). Backend: GET/POST/PUT/DELETE `/api/admin/ongkir` (validasi duplikat kota+kurir,
   harga >=0). Seed 4 tarif contoh saat kosong. Checkout pembeli tetap pakai `GET /api/ongkir`.
 - Google login (Emergent OAuth) diverifikasi berjalan di web preview (redirect ke Google benar).
+- FIX (2026-09-13): Google login stuck di spinner — gate `_layout.tsx` kini redirect user yang
+  kembali ke "/" (setelah OAuth redirect) ke /home (`user && (inAuthGroup || !root)`).
+- Dashboard admin: kartu "Penjualan Hari Ini" & "Penjualan Bulan Ini" (sum total order berstatus
+  menunggu_konfirmasi/sedang_dikemas/dikirim/selesai, batas hari/bulan dalam WIB) di
+  GET /api/admin/stats + /dashboard/index.tsx.
 
 
 ## Next Tasks
