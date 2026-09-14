@@ -333,3 +333,12 @@ Inter body. Language: Indonesian.
 - Link share -> dianastuff.com via src/utils/links.ts (live, produk, webview "Toko Versi Web").
   E2E tamu join dari https://dianastuff.com/live TERUJI berhasil (iter22).
 - WAJIB: build APK baru agar fix native ikut; web.zip tidak perlu rebuild (hanya native berubah).
+
+## FIX (2026-09-14 — APK 358MB terlalu besar), iter24
+- Penyebab: library native Agora (mesin video) dikemas untuk 4 ABI (arm64, arm-v7a, x86, x86_64).
+  Landing page BUKAN penyebab (murni JS ~20KB; route normal, memang harus ada di APK juga).
+- FIX: expo-build-properties + app.json android.buildArchs=["arm64-v8a"] -> build hanya arsitektur
+  arm64 (dipakai hampir semua HP Android modern) -> APK diperkirakan turun ~1/4 (~90-120MB).
+  ProGuard sengaja TIDAK diaktifkan (berisiko merusak Agora di release build).
+- Terverifikasi iter24: konfigurasi valid & mekanisme resmi (reactNativeArchitectures).
+  WAJIB build APK baru untuk melihat efeknya.

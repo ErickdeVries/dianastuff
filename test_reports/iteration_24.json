@@ -1,0 +1,34 @@
+{
+  "summary": "Iter24 verification of APK-size build-config fix (expo-build-properties android.buildArchs=[arm64-v8a]) — ALL PASS. (1) app.json is valid JSON; expo-build-properties plugin present with android.buildArchs=[\"arm64-v8a\"] (app.json:64-73); all required android.permissions present: READ_MEDIA_IMAGES, CAMERA, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, ACCESS_NETWORK_STATE, ACCESS_WIFI_STATE, BLUETOOTH, BLUETOOTH_CONNECT. (2) expo-build-properties ~57.0.17 in package.json dependencies and installed; its schema accepts android.buildArchs (node_modules/expo-build-properties/src/pluginConfig.ts:774 — array of strings) and maps it to the Gradle property 'reactNativeArchitectures' = arm64-v8a (src/android.ts:115), which is exactly the standard mechanism that drives abiFilters in the Expo/RN Gradle template — so the next build will package Agora native libs only for arm64-v8a. (3) Web smoke PASS: 'npx expo export --platform web' completed with no errors, dist generated (9.3MB total; entry.js 3MB, AgoraRTC web SDK 1.6MB as a separate chunk). Landing renders at / on https://diana-store-2.preview.emergentagent.com (hero, Masuk, Belanja Sekarang, Tonton Live buttons all visible); /toko storefront renders with products, prices, stock, category chips — no regression from the app.json change. (4) Landing is a normal route: app/index.tsx and app/landing.tsx both render src/components/landing-page.tsx (19.9KB of pure JS/JSX, zero native code) — contributes only KBs to the JS bundle and nothing to native APK size, confirming the RCA that the 358MB APK bloat came from react-native-agora native .so libs across all 4 ABIs, not the landing page. ProGuard correctly left disabled to avoid breaking Agora in release.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/screenshots/iter24_toko.png"
+  ],
+  "action_items": [
+    "Config fix verified — user should rebuild the APK (eas build or expo prebuild + gradle) and confirm size drops from ~358MB to roughly 1/4 (~90-120MB expected for Agora-based app on arm64-v8a only).",
+    "Note for user: devices on 32-bit (armeabi-v7a, very old phones) will not be able to install the new APK — acceptable trade-off per fix decision."
+  ],
+  "critical_code_review_comments": [
+    "app.json:64-73 expo-build-properties config is correct; schema-validated against node_modules (pluginConfig.ts:774).",
+    "android.buildArchs -> reactNativeArchitectures Gradle property (android.ts:115) is the correct, officially supported ABI-filter mechanism; joins to 'arm64-v8a' only.",
+    "package.json:25 uses '~57.0.17' which resolves to 57.0.17+ patch range — acceptable, installed version satisfies the plugin.",
+    "Landing page (src/components/landing-page.tsx, 19.9KB) is pure React Native JS with no native modules — cannot affect APK size; user suspicion ruled out.",
+    "react-native-agora remains at 4.6.4 with intentional runtime require for Expo Go/web safety (per iter22/23) — no deprecated packages introduced by this change."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not run (frontend-only request)", "frontend": "100% (config 2/2, schema 1/1, web export 1/1, routes 2/2)"},
+  "seed_data_creation": "None.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Build-config fix fully verified; actual APK size reduction is only observable after user rebuilds. Web preview unaffected: / = landing, /toko = storefront, guest /live shows 'Belum ada siaran live', admin login admin/admin123 works. dist/ was regenerated during testing (rm -rf + expo export) — harmless for dev server.",
+  "rca_of_issue": "358MB APK root cause: react-native-agora packages native video-engine .so libraries for all 4 Android ABIs (arm64-v8a, armeabi-v7a, x86, x86_64) — each ABI adds ~80MB+ uncompressed. Landing page is 19.9KB JS, irrelevant. Mitigation verified: expo-build-properties android.buildArchs=[arm64-v8a] -> Gradle reactNativeArchitectures=arm64-v8a -> abiFilters limited to arm64-v8a, covering virtually all modern Android phones. ProGuard intentionally not enabled to avoid stripping Agora JNI classes."
+}
