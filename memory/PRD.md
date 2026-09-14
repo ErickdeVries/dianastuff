@@ -236,3 +236,5 @@ Inter body. Language: Indonesian.
 - Beauty slider (@react-native-community/slider) muncul saat filter Halus/Cerah -> atur
   smoothness/lightening via applyFilter(id, level 0..1) real-time.
 - Hanya aktif di build HP asli (Agora); di web/Expo Go video hitam (wajar).
+- FIX margin bawah live: kolom chat & input bar pakai Math.max(insets.bottom,12)+12 (host &
+  penonton) + chat overlay host diangkat dgn safe-area agar tidak tertimpa tombol navigasi HP.

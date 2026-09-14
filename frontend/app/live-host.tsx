@@ -261,7 +261,7 @@ export default function LiveHostScreen() {
       ) : null}
 
       {/* Chat overlay */}
-      <View style={styles.chatOverlay} pointerEvents="box-none">
+      <View style={[styles.chatOverlay, { bottom: Math.max(insets.bottom, 8) + 8 }]} pointerEvents="box-none">
         <FlatList
           ref={chatRef}
           data={chat}
@@ -291,7 +291,7 @@ export default function LiveHostScreen() {
 
       {/* Comment input */}
       <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
-        <View style={[styles.inputBar, { paddingBottom: insets.bottom + 10 }]}>
+        <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 12) + 12 }]}>
           <TextInput
             testID="host-chat-input"
             style={styles.input}

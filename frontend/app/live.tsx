@@ -347,12 +347,12 @@ export default function LiveViewerScreen() {
       {/* Chat input */}
       <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
         {muted ? (
-          <View style={[styles.mutedBar, { paddingBottom: insets.bottom + 12 }]}>
+          <View style={[styles.mutedBar, { paddingBottom: Math.max(insets.bottom, 12) + 12 }]}>
             <MaterialDesignIcons name="microphone-off" size={18} color={colors.muted} />
             <Text style={styles.mutedText}>Anda dibisukan admin</Text>
           </View>
         ) : (
-          <View style={[styles.inputBar, { paddingBottom: insets.bottom + 10 }]}>
+          <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 12) + 12 }]}>
             <TextInput
               testID="live-chat-input"
               style={styles.input}
