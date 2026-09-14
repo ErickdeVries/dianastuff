@@ -313,3 +313,11 @@ Inter body. Language: Indonesian.
   TODO: setelah user redeploy Emergent -> panggil endpoint di diana-store-2.emergent.host,
   lalu sync ongkir/akun via API admin produksi, lalu HAPUS endpoint ini.
 - CATATAN: DB produksi TERPISAH dari lokal (reset lokal tidak mempengaruhi produksi).
+
+## Selesai (2026-09-14 — Reset admin produksi + verifikasi sinkronisasi)
+- User redeploy Emergent -> endpoint maintenance aktif di produksi -> password admin PRODUKSI
+  direset ke admin123 via POST /api/maintenance/reset-admin (x-maintenance-key). Login produksi OK.
+- Verifikasi data: produk (3, identik harga/stok/gambar), profil toko (identik), ongkir (4 entri,
+  identik sampai ID), pesanan 39=39. Pelanggan produksi 14 > lokal 7 (produksi = master).
+  KESIMPULAN: data produksi sudah tersinkron, tidak ada yang perlu disalin.
+- Endpoint maintenance SUDAH DIHAPUS dari kode (hilang dari produksi pada redeploy berikutnya).

@@ -456,42 +456,6 @@ async def change_password(payload: ChangePassword, authorization: Optional[str] 
 
 
 # ---------------------------------------------------------------------------
-# One-time maintenance: reset whitelist admin password on a fresh deployment.
-# Gated by the Agora certificate secret that ships in the deployed .env.
-# Remove this endpoint after use.
-# ---------------------------------------------------------------------------
-class AdminReset(BaseModel):
-    password: str = "admin123"
-
-
-@api_router.post("/maintenance/reset-admin")
-async def maintenance_reset_admin(payload: AdminReset, request: Request):
-    expected = os.environ.get("AGORA_APP_CERTIFICATE", "")
-    if not expected or request.headers.get("x-maintenance-key") != expected:
-        raise HTTPException(status_code=404, detail="Not found")
-    if len(payload.password) < 6:
-        raise HTTPException(status_code=400, detail="Password minimal 6 karakter")
-    new_hash = hash_password(payload.password)
-    res = await db.users.update_one(
-        {"username": "admin", "role": "admin"},
-        {"$set": {"password_hash": new_hash, "status": "approved"}},
-    )
-    if res.matched_count == 0:
-        # Admin belum ada sama sekali -> buat baru.
-        await db.users.insert_one({
-            "user_id": f"user_{uuid.uuid4().hex[:12]}",
-            "username": "admin",
-            "password_hash": new_hash,
-            "role": "admin",
-            "status": "approved",
-            "nama": "Admin",
-            "auth_provider": "whitelist",
-            "created_at": datetime.now(timezone.utc),
-        })
-    return {"ok": True, "message": "Password admin direset"}
-
-
-# ---------------------------------------------------------------------------
 # Uploads / file serving (Emergent Object Storage)
 # ---------------------------------------------------------------------------
 @api_router.post("/upload")
