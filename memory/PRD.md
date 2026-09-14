@@ -256,3 +256,16 @@ Inter body. Language: Indonesian.
 - Termasuk `_redirects` (/* -> /index.html 200) untuk Cloudflare Pages.
 - Zip di `/app/backend/static_downloads/landing.zip`, download via
   `GET /api/download/landing.zip` ("dianastuff-landing.zip"); web.zip tetap di `/api/download/web.zip`.
+
+## Implemented (2026-06 fork — Landing menyatu di bundle web, pola kulproy.com)
+- Landing page jadi bagian aplikasi: komponen `src/components/landing-page.tsx`, dipakai route
+  `/` (index.tsx, untuk tamu) dan `/landing` (publik). Gate `_layout.tsx`: tamu boleh akses
+  `!root` + `landing`; user login tetap diarahkan dari "/" ke etalase/admin.
+- Konten landing (data dari GET /api/profil_admin publik): navbar (logo + tombol Masuk), Hero
+  (banner toko + overlay, badge, judul, tagline, CTA "Belanja Sekarang"->/login & "Tonton
+  Live"->/live, trust row), Fitur (4 kartu), ajakan Live, Tentang & Kontak (WA, rekening,
+  jam operasional, kurir), footer.
+- `web.zip` di-rebuild (expo export) dengan landing menyatu -> satu kali upload Cloudflare
+  Pages ke dianastuff.com; `/` langsung landing, CTA ke /login. `_redirects` tetap disertakan.
+- Diverifikasi: guest buka "/" -> landing; klik "Belanja Sekarang" -> /login (Login Google/
+  Whitelist tampil).
