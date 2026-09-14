@@ -27,6 +27,10 @@ const FEATURES = [
   { icon: "package-variant-closed", title: "Lacak Pesanan", desc: "Pantau status pesanan dari diproses, dikirim, sampai tiba — lengkap dengan nomor resi." },
 ];
 
+// Link download APK Android. Kosong = tombol tampil "Segera Hadir".
+// Setelah build Android jadi, APK dilayani via backend: .../api/download/app.apk
+const APK_URL = "";
+
 function waLink(no: string): string {
   let d = (no || "").replace(/\D/g, "");
   if (d.startsWith("620")) d = `62${d.slice(3)}`;
@@ -164,6 +168,31 @@ export function LandingPage() {
         </View>
       </View>
 
+      {/* ===== UNDUH APK ===== */}
+      <View style={styles.section}>
+        <View style={styles.apkCard}>
+          <View style={styles.apkIcon}>
+            <MaterialDesignIcons name="android" size={34} color={colors.onBrandPrimary} />
+          </View>
+          <Text style={styles.apkTitle}>Lebih Nyaman Lewat Aplikasi</Text>
+          <Text style={styles.apkDesc}>
+            Unduh aplikasi Android dianastuff — kamera live seller, notifikasi, dan belanja lebih cepat. Install langsung, tanpa Play Store.
+          </Text>
+          {APK_URL ? (
+            <Pressable testID="landing-apk" style={styles.ctaPrimary} onPress={() => Linking.openURL(APK_URL)}>
+              <MaterialDesignIcons name="download" size={20} color="#fff" />
+              <Text style={styles.ctaPrimaryText}>Unduh APK Android</Text>
+            </Pressable>
+          ) : (
+            <View style={[styles.ctaPrimary, styles.apkSoon]}>
+              <MaterialDesignIcons name="download" size={20} color={colors.muted} />
+              <Text style={[styles.ctaPrimaryText, { color: colors.muted }]}>APK Segera Hadir</Text>
+            </View>
+          )}
+          <Text style={styles.apkNote}>Saat install, pilih “Izinkan dari sumber ini” jika diminta.</Text>
+        </View>
+      </View>
+
       {/* ===== TENTANG & KONTAK ===== */}
       <View style={[styles.section, styles.aboutSection]}>
         <Text style={styles.eyebrow}>TENTANG KAMI</Text>
@@ -273,6 +302,14 @@ const useStyles = makeStyles((colors) => ({
   liveCtas: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   ctaOutline: { borderWidth: 1.5, borderColor: colors.onSurfaceInverse, borderRadius: 999, paddingVertical: 14, paddingHorizontal: 24 },
   ctaOutlineText: { fontFamily: fonts.bodyMedium, fontSize: 15, color: colors.onSurfaceInverse },
+
+  // Unduh APK
+  apkCard: { backgroundColor: colors.surfaceSecondary, borderRadius: 26, padding: 28, alignItems: "center", borderWidth: 1, borderColor: colors.brandTertiary },
+  apkIcon: { width: 64, height: 64, borderRadius: 20, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center", marginBottom: 14 },
+  apkTitle: { fontFamily: fonts.heading, fontSize: 22, color: colors.onSurface, textAlign: "center" },
+  apkDesc: { fontFamily: fonts.body, fontSize: 14, lineHeight: 22, color: colors.muted, textAlign: "center", marginTop: 8, marginBottom: 20, maxWidth: 480 },
+  apkSoon: { backgroundColor: colors.surfaceTertiary },
+  apkNote: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, marginTop: 12, textAlign: "center" },
 
   // Tentang
   aboutSection: { backgroundColor: colors.surfaceTertiary },

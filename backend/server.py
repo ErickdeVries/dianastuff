@@ -515,6 +515,19 @@ async def download_landing_bundle():
     )
 
 
+@api_router.api_route("/download/app.apk", methods=["GET", "HEAD"])
+async def download_app_apk():
+    apk_path = ROOT_DIR / "static_downloads" / "app.apk"
+    if not apk_path.exists():
+        raise HTTPException(status_code=404, detail="APK belum tersedia")
+    return FileResponse(
+        path=str(apk_path),
+        filename="dianastuff.apk",
+        media_type="application/vnd.android.package-archive",
+        headers={"Content-Disposition": 'attachment; filename="dianastuff.apk"'},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Products (public read; admin write)
 # ---------------------------------------------------------------------------

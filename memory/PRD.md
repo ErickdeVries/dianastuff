@@ -269,3 +269,10 @@ Inter body. Language: Indonesian.
   Pages ke dianastuff.com; `/` langsung landing, CTA ke /login. `_redirects` tetap disertakan.
 - Diverifikasi: guest buka "/" -> landing; klik "Belanja Sekarang" -> /login (Login Google/
   Whitelist tampil).
+
+## Implemented (2026-06 fork — Tombol Unduh APK di landing, APK-only)
+- Section "Lebih Nyaman Lewat Aplikasi" di landing-page.tsx: tombol unduh APK; saat link belum
+  diisi tampil "APK Segera Hadir". Konstanta APK_URL di atas komponen; isi setelah APK jadi.
+- Endpoint `GET /api/download/app.apk` (backend) siap melayani APK dari
+  backend/static_downloads/app.apk sebagai dianastuff.apk. TIDAK ada link .aab di landing
+  (AAB hanya untuk Play Store nanti). web.zip sudah di-rebuild berisi section ini.
