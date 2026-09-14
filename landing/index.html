@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dianastuff — Live Shopping & Belanja Online</title>
+<meta name="description" content="Belanja produk pilihan di dianastuff. Nonton live shopping, chat langsung dengan seller, dan checkout mudah." />
+<meta name="theme-color" content="#A855F7" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%23A855F7'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white' font-family='Arial' font-weight='bold'>D</text></svg>" />
+<style>
+  :root{
+    --primary:#A855F7; --primary-dark:#9333EA; --primary-light:#E9D5FF; --primary-soft:#F5EEFF;
+    --ink:#1F1333; --muted:#6B6480; --line:#EFE7FA; --white:#FFFFFF;
+    --radius:18px; --shadow:0 12px 32px rgba(168,85,247,.16);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{font-family:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--white);line-height:1.6}
+  img{max-width:100%;display:block}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 20px}
+  a{text-decoration:none;color:inherit}
+
+  /* ===== NAVBAR ===== */
+  nav{position:fixed;top:0;left:0;right:0;z-index:50;background:rgba(255,255,255,.86);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+  .nav-in{max-width:1100px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.15rem;color:var(--ink)}
+  .logo{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,var(--primary),#7C3AED);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.15rem;box-shadow:var(--shadow)}
+  .logo img{width:100%;height:100%;object-fit:cover;border-radius:12px}
+  .nav-links{display:flex;gap:22px;align-items:center}
+  .nav-links a.link{font-weight:600;font-size:.95rem;color:var(--muted)}
+  .nav-links a.link:hover{color:var(--primary)}
+  @media(max-width:640px){.nav-links a.link{display:none}}
+
+  /* ===== BUTTONS ===== */
+  .btn{display:inline-flex;align-items:center;gap:8px;font-weight:700;padding:14px 26px;border-radius:999px;font-size:1rem;transition:.2s;border:2px solid transparent;cursor:pointer}
+  .btn-primary{background:var(--primary);color:#fff;box-shadow:var(--shadow)}
+  .btn-primary:hover{background:var(--primary-dark);transform:translateY(-2px)}
+  .btn-ghost{background:rgba(255,255,255,.92);color:var(--ink);border-color:rgba(255,255,255,.6)}
+  .btn-ghost:hover{background:#fff}
+  .btn-outline{background:transparent;color:var(--primary);border-color:var(--primary)}
+  .btn-outline:hover{background:var(--primary);color:#fff}
+  .btn-sm{padding:10px 20px;font-size:.9rem}
+
+  /* ===== HERO ===== */
+  .hero{position:relative;min-height:92vh;display:flex;align-items:center;background:#2B1446;overflow:hidden}
+  .hero-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.34}
+  .hero-grad{position:absolute;inset:0;background:linear-gradient(180deg,rgba(43,20,70,.72),rgba(43,20,70,.88) 60%,#2B1446)}
+  .hero-in{position:relative;z-index:2;text-align:center;color:#fff;padding:130px 20px 90px;max-width:820px;margin:0 auto}
+  .badge{display:inline-flex;align-items:center;gap:8px;background:rgba(168,85,247,.22);border:1px solid rgba(233,213,255,.4);color:#F5EEFF;padding:8px 18px;border-radius:999px;font-weight:600;font-size:.85rem;letter-spacing:.4px}
+  .badge .dot{width:8px;height:8px;border-radius:50%;background:#F472B6;animation:pulse 1.6s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .hero h1{font-size:clamp(2.4rem,7vw,4rem);font-weight:800;line-height:1.12;margin:22px 0 14px}
+  .hero h1 span{background:linear-gradient(90deg,#E9D5FF,#F5D0FE);-webkit-background-clip:text;background-clip:text;color:transparent}
+  /* ====== UBAH TAGLINE DI BAWAH INI ====== */
+  .tagline{font-size:clamp(1rem,2.6vw,1.25rem);color:#E8DCF8;max-width:640px;margin:0 auto 34px}
+  .cta-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .hero-trust{margin-top:44px;display:flex;gap:26px;justify-content:center;flex-wrap:wrap;color:#D9C6F5;font-size:.9rem;font-weight:600}
+  .hero-trust div{display:flex;align-items:center;gap:8px}
+
+  /* ===== SECTIONS ===== */
+  section{padding:88px 0}
+  .sec-head{text-align:center;max-width:640px;margin:0 auto 52px}
+  .sec-head .eyebrow{color:var(--primary);font-weight:800;letter-spacing:2px;text-transform:uppercase;font-size:.8rem}
+  .sec-head h2{font-size:clamp(1.7rem,4.6vw,2.4rem);font-weight:800;margin:10px 0 12px}
+  .sec-head p{color:var(--muted)}
+
+  /* Fitur */
+  .grid{display:grid;gap:20px}
+  .grid-4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:900px){.grid-4{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:520px){.grid-4{grid-template-columns:1fr}}
+  .card{background:var(--white);border:1px solid var(--line);border-radius:var(--radius);padding:30px 24px;transition:.25s}
+  .card:hover{transform:translateY(-5px);box-shadow:var(--shadow);border-color:var(--primary-light)}
+  .ic{width:56px;height:56px;border-radius:16px;background:var(--primary-soft);display:flex;align-items:center;justify-content:center;font-size:1.7rem;margin-bottom:16px}
+  .card h3{font-size:1.08rem;font-weight:700;margin-bottom:8px}
+  .card p{color:var(--muted);font-size:.94rem}
+
+  /* Live section */
+  .live{background:linear-gradient(135deg,#3B1C63,#6D28D9);border-radius:28px;color:#fff;padding:60px 40px;display:flex;align-items:center;gap:44px;flex-wrap:wrap;position:relative;overflow:hidden}
+  .live::before{content:'';position:absolute;width:340px;height:340px;border-radius:50%;background:rgba(255,255,255,.07);top:-120px;right:-90px}
+  .live .txt{flex:1;min-width:260px;position:relative;z-index:2}
+  .live h2{font-size:clamp(1.6rem,4.4vw,2.3rem);font-weight:800;margin:12px 0 14px}
+  .live p{color:#E6DAF8;max-width:520px}
+  .live .cta{margin-top:26px;display:flex;gap:12px;flex-wrap:wrap}
+  .live-visual{flex:0 0 240px;display:flex;justify-content:center;position:relative;z-index:2}
+  .phone{width:150px;height:270px;border-radius:26px;background:#170B2B;border:6px solid rgba(255,255,255,.18);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;transform:rotate(6deg);box-shadow:0 24px 60px rgba(0,0,0,.4)}
+  .phone .rec{display:flex;align-items:center;gap:6px;background:#EF4444;color:#fff;font-size:.66rem;font-weight:800;padding:5px 12px;border-radius:999px}
+  .phone .rec i{width:7px;height:7px;border-radius:50%;background:#fff;animation:pulse 1.4s infinite}
+  .phone .cam{font-size:2.4rem}
+  .phone .cap{font-size:.7rem;color:#C9B8E8;text-align:center;padding:0 14px}
+
+  /* Tentang / Kontak */
+  .about{background:var(--primary-soft)}
+  .about-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:36px;align-items:start}
+  @media(max-width:820px){.about-grid{grid-template-columns:1fr}}
+  .info-item{display:flex;gap:14px;padding:16px 0;border-bottom:1px dashed #E2D3F5;align-items:flex-start}
+  .info-item:last-child{border-bottom:none}
+  .info-item .ii{width:44px;height:44px;flex:0 0 44px;border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:1.25rem;box-shadow:var(--shadow)}
+  .info-item b{display:block;font-size:.98rem}
+  .info-item span{color:var(--muted);font-size:.92rem}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .chip{background:#fff;border:1px solid var(--primary-light);color:var(--primary-dark);font-weight:600;font-size:.8rem;padding:6px 13px;border-radius:999px}
+
+  footer{background:#2B1446;color:#C9B8E8;padding:36px 0;text-align:center;font-size:.9rem}
+  footer .fbrand{color:#fff;font-weight:800;font-size:1.1rem;margin-bottom:6px}
+</style>
+</head>
+<body>
+
+<!-- ============ NAVBAR ============ -->
+<nav>
+  <div class="nav-in">
+    <div class="brand">
+      <div class="logo"><!-- Taruh logo di sini: <img src="URL_LOGO"> -->D</div>
+      <span>dianastuff</span>
+    </div>
+    <div class="nav-links">
+      <a class="link" href="#fitur">Fitur</a>
+      <a class="link" href="#live">Live Shopping</a>
+      <a class="link" href="#tentang">Tentang</a>
+      <a class="btn btn-primary btn-sm" data-app href="#" target="_blank" rel="noopener">Belanja Sekarang</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<header class="hero">
+  <img class="hero-bg" src="https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1600" alt="dianastuff" />
+  <div class="hero-grad"></div>
+  <div class="hero-in">
+    <span class="badge"><span class="dot"></span> LIVE SHOPPING &amp; TOKO ONLINE</span>
+    <h1>Belanja Seru di <span>dianastuff</span></h1>
+    <!-- ==========================================================
+         UBAH TAGLINE ANDA DI SINI (baris di bawah)
+         ========================================================== -->
+    <p class="tagline">Tulis tagline toko Anda di sini — misalnya: Produk pilihan, harga bersahabat, belanja makin menyenangkan lewat live shopping.</p>
+    <!-- ========================================================== -->
+    <div class="cta-row">
+      <a class="btn btn-primary" data-app href="#" target="_blank" rel="noopener">🛒 Belanja Sekarang</a>
+      <a class="btn btn-ghost" data-live href="#" target="_blank" rel="noopener">🎥 Tonton Live</a>
+    </div>
+    <div class="hero-trust">
+      <div>🚚 JNE · J&amp;T · Lion Parcel · Gosend</div>
+      <div>💬 Chat Langsung dengan Seller</div>
+      <div>⭐ Ulasan Berfoto dari Pembeli</div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ FITUR ============ -->
+<section id="fitur">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Kenapa dianastuff</div>
+      <h2>Belanja Lebih Interaktif &amp; Mudah</h2>
+      <p>Semua kebutuhan belanja Anda dalam satu aplikasi — dari nonton live sampai pesanan tiba.</p>
+    </div>
+    <div class="grid grid-4">
+      <div class="card">
+        <div class="ic">🎥</div>
+        <h3>Live Shopping</h3>
+        <p>Nonton siaran langsung, lihat produk secara real, dan belanja sambil live berlangsung.</p>
+      </div>
+      <div class="card">
+        <div class="ic">💬</div>
+        <h3>Chat Realtime</h3>
+        <p>Tanya produk, ukuran, atau stok langsung ke seller — dibalas seketika.</p>
+      </div>
+      <div class="card">
+        <div class="ic">🛒</div>
+        <h3>Checkout Mudah</h3>
+        <p>Keranjang, ongkir otomatis per kota &amp; kurir, lalu transfer dan konfirmasi pembayaran.</p>
+      </div>
+      <div class="card">
+        <div class="ic">📦</div>
+        <h3>Lacak Pesanan</h3>
+        <p>Pantau status pesanan dari diproses, dikirim, sampai tiba — lengkap dengan nomor resi.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ LIVE SHOPPING ============ -->
+<section id="live">
+  <div class="wrap">
+    <div class="live">
+      <div class="txt">
+        <span class="badge" style="background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.3)"><span class="dot"></span> SEDANG / AKAN LIVE</span>
+        <h2>Jangan Lewatkan Live Shopping!</h2>
+        <p>Diskon spesial &amp; produk sorotan hanya saat live. Komen langsung, kirim like, dan checkout produk favorit tanpa ribet.</p>
+        <div class="cta">
+          <a class="btn btn-primary" data-live href="#" target="_blank" rel="noopener">Gabung Live Sekarang</a>
+          <a class="btn btn-ghost" data-app href="#" target="_blank" rel="noopener">Lihat Etalase</a>
+        </div>
+      </div>
+      <div class="live-visual">
+        <div class="phone">
+          <div class="rec"><i></i>LIVE</div>
+          <div class="cam">📹</div>
+          <div class="cap">Nonton &amp; belanja langsung dari live</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TENTANG & KONTAK ============ -->
+<section id="tentang" class="about">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Tentang Kami</div>
+      <h2>Diana Stuff</h2>
+      <p>Toko online terpercaya dengan pengalaman belanja live yang menyenangkan.</p>
+    </div>
+    <div class="about-grid">
+      <div>
+        <div class="info-item">
+          <div class="ii">💬</div>
+          <div>
+            <b>WhatsApp</b>
+            <span><a href="https://wa.me/6285312812452" target="_blank" rel="noopener" style="color:var(--primary);font-weight:700">0853-1281-2452</a> — klik untuk chat langsung</span>
+          </div>
+        </div>
+        <div class="info-item">
+          <div class="ii">🏦</div>
+          <div>
+            <b>Pembayaran Transfer</b>
+            <span>Mandiri 1640007214010 a.n. Mahdiana Hrp</span>
+          </div>
+        </div>
+        <div class="info-item">
+          <div class="ii">🕒</div>
+          <div>
+            <b>Jam Operasional</b>
+            <!-- UBAH JAM OPERASIONAL DI SINI -->
+            <span>Senin – Sabtu, 09.00 – 21.00 WIB</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="card" style="background:#fff">
+          <h3 style="margin-bottom:6px">📍 Pengiriman</h3>
+          <p style="margin-bottom:12px">Pesanan dikirim dengan kurir pilihan Anda:</p>
+          <div class="chips">
+            <span class="chip">JNE</span>
+            <span class="chip">J&amp;T</span>
+            <span class="chip">Lion Parcel</span>
+            <span class="chip">Gosend Instan/Sameday</span>
+          </div>
+          <div style="margin-top:22px;text-align:center">
+            <a class="btn btn-outline" href="https://wa.me/6285312812452" target="_blank" rel="noopener">Chat WhatsApp</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="fbrand">dianastuff</div>
+  <div>© <span id="yr"></span> Diana Stuff. Semua hak dilindungi.</div>
+</footer>
+
+<script>
+  /* ==========================================================
+     UBAH LINK APLIKASI WEB ANDA DI SINI (setelah domain web app aktif):
+     - APP_URL  : alamat aplikasi belanja web (hasil deploy web.zip)
+     ========================================================== */
+  const APP_URL = "https://diana-store-2.preview.emergentagent.com";
+  const LIVE_URL = APP_URL + "/live";
+
+  document.querySelectorAll("[data-app]").forEach((a) => (a.href = APP_URL));
+  document.querySelectorAll("[data-live]").forEach((a) => (a.href = LIVE_URL));
+  document.getElementById("yr").textContent = new Date().getFullYear();
+</script>
+</body>
+</html>

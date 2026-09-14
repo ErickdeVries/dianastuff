@@ -244,3 +244,15 @@ Inter body. Language: Indonesian.
 - Export web statis via `npx expo export -p web` ke `/app/frontend/dist`.
 - File `_redirects` (`/*  /index.html  200`) disertakan otomatis untuk SPA routing Cloudflare Pages.
 - Disajikan via download endpoint: `GET /api/download/web.zip` (`dianastuff-web.zip`).
+
+## Implemented (2026-06 fork — Landing Page untuk Cloudflare)
+- Landing page statis `/app/landing/index.html` (single-file, tema Soft Purple #A855F7, ID):
+  navbar, Hero (nama dianastuff + tagline editable + CTA "Belanja Sekarang"/"Tonton Live"),
+  Fitur (Live Shopping, Chat Realtime, Checkout Mudah, Lacak Pesanan), ajakan Live Shopping
+  (mock phone), Tentang & Kontak (WA 085312812452->wa.me/6285312812452, transfer Mandiri
+  1640007214010 a.n. Mahdiana Hrp, jam operasional editable, kurir JNE/J&T/Lion/Gosend), footer.
+- Konstanta `APP_URL` di script bagian bawah -> tombol CTA diarahkan ke web app (sekarang default
+  preview URL; ganti ke domain app setelah aktif). Tombol Live -> APP_URL/live.
+- Termasuk `_redirects` (/* -> /index.html 200) untuk Cloudflare Pages.
+- Zip di `/app/backend/static_downloads/landing.zip`, download via
+  `GET /api/download/landing.zip` ("dianastuff-landing.zip"); web.zip tetap di `/api/download/web.zip`.

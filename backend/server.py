@@ -502,6 +502,19 @@ async def download_web_bundle():
     )
 
 
+@api_router.api_route("/download/landing.zip", methods=["GET", "HEAD"])
+async def download_landing_bundle():
+    zip_path = ROOT_DIR / "static_downloads" / "landing.zip"
+    if not zip_path.exists():
+        raise HTTPException(status_code=404, detail="Bundle belum tersedia")
+    return FileResponse(
+        path=str(zip_path),
+        filename="dianastuff-landing.zip",
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="dianastuff-landing.zip"'},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Products (public read; admin write)
 # ---------------------------------------------------------------------------
