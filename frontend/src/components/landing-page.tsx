@@ -27,9 +27,8 @@ const FEATURES = [
   { icon: "package-variant-closed", title: "Lacak Pesanan", desc: "Pantau status pesanan dari diproses, dikirim, sampai tiba — lengkap dengan nomor resi." },
 ];
 
-// Link download APK Android. Kosong = tombol tampil "Segera Hadir".
-// Setelah build Android jadi, APK dilayani via backend: .../api/download/app.apk
-const APK_URL = "";
+// Link download APK Android langsung dari CDN aset.
+const APK_URL = "https://customer-assets-wrfwihn1.emergentagent.net/job_diana-store-2/artifacts/x2w19o9v_dianastuff1.0.6.apk";
 
 const INSTALL_STEPS = [
   "Tekan tombol “Unduh APK Android”, lalu buka file yang terunduh.",

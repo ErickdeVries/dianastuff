@@ -349,3 +349,10 @@ Inter body. Language: Indonesian.
 - Host tak melihat emoji: penyebab = bug socket guest-reuse (sudah fix iter25) — terverifikasi
   ulang iter26: reaction tamu kini MUNCUL juga di layar host (live_react ke room live+admins).
 - Fix host visibility butuh APK BARU (build lama belum memuat perbaikan socket).
+
+## Implemented (2026-09-14 — APK 1.0.6 dicantolkan ke Landing Page)
+- File APK dianastuff1.0.6.apk (121MB — turun dari 358MB berkat arm64 buildArchs) sudah
+  disimpan di static_downloads/app.apk dan dicantolkan ke tombol "Unduh APK Android" di landing
+  page via direct CDN URL.
+- Tombol di landing page sekarang AKTIF (warna ungu + ikon download, bukan "Segera Hadir").
+- web.zip terbaru di-rebuild dan siap diupload ke Cloudflare Pages.
