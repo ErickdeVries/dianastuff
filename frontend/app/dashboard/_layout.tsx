@@ -14,6 +14,7 @@ type Item = { name: string; label: string; icon: string };
 const ITEMS: Item[] = [
   { name: "index", label: "Dashboard", icon: "view-dashboard-outline" },
   { name: "live", label: "Live Shopping", icon: "access-point" },
+  { name: "live-rekap", label: "Rekap Live", icon: "chart-box-outline" },
   { name: "produk", label: "Produk", icon: "tag-outline" },
   { name: "pesanan", label: "Pesanan", icon: "receipt-text-outline" },
   { name: "ongkir", label: "Ongkir Manual", icon: "truck-outline" },
@@ -127,6 +128,7 @@ export default function DashboardLayout() {
     >
       <Drawer.Screen name="index" options={{ title: "Dashboard" }} />
       <Drawer.Screen name="live" options={{ title: "Live Shopping" }} />
+      <Drawer.Screen name="live-rekap" options={{ title: "Rekap Live" }} />
       <Drawer.Screen name="produk" options={{ title: "Produk" }} />
       <Drawer.Screen name="pesanan" options={{ title: "Pesanan" }} />
       <Drawer.Screen name="ongkir" options={{ title: "Ongkir Manual" }} />

@@ -518,8 +518,24 @@ async def get_product(product_id: str):
 from agora_token_builder import RtcTokenBuilder  # noqa: E402
 
 LIVE_CHANNEL = "dianastuff_live"
-# Ephemeral in-memory buffer of recent live chat messages (reset each show).
-LIVE_CHAT_BUFFER: List[dict] = []
+# ---- In-memory live session state (reset each show) ----
+LIVE_CHAT_BUFFER: List[dict] = []      # recent live chat messages
+LIVE_VIEWERS: dict = {}                # sid -> {name, role, user_id}
+LIVE_MUTED: set = set()                # muted user_ids (cannot chat)
+LIVE_KICKED: set = set()               # kicked user_ids (removed, cannot rejoin)
+LIVE_PINNED: Optional[dict] = None     # pinned comment {id,name,role,text}
+LIVE_STATS: dict = {"peak_viewers": 0, "total_likes": 0}
+
+
+def _reset_live_state() -> None:
+    global LIVE_PINNED
+    LIVE_CHAT_BUFFER.clear()
+    LIVE_VIEWERS.clear()
+    LIVE_MUTED.clear()
+    LIVE_KICKED.clear()
+    LIVE_PINNED = None
+    LIVE_STATS["peak_viewers"] = 0
+    LIVE_STATS["total_likes"] = 0
 
 
 class LiveStart(BaseModel):
@@ -528,6 +544,11 @@ class LiveStart(BaseModel):
     product_ids: List[str] = []
     show_cart: bool = True
     require_login: bool = False
+    featured_product_id: Optional[str] = None
+
+
+class LiveFeature(BaseModel):
+    product_id: Optional[str] = None
 
 
 async def live_public(show: dict) -> dict:
@@ -538,6 +559,12 @@ async def live_public(show: dict) -> dict:
         ).to_list(50)
         by_id = {p["id"]: product_public(p) for p in docs}
         prods = [by_id[pid] for pid in show["product_ids"] if pid in by_id]
+    featured = None
+    fid = show.get("featured_product_id")
+    if fid:
+        fdoc = await db.products.find_one({"id": fid, "deleted_at": None}, {"_id": 0})
+        if fdoc:
+            featured = product_public(fdoc)
     profil = await db.profil_admin.find_one({}, {"_id": 0}) or {}
     return {
         "channel": show.get("channel", LIVE_CHANNEL),
@@ -545,6 +572,7 @@ async def live_public(show: dict) -> dict:
         "caption": show.get("caption", ""),
         "show_cart": show.get("show_cart", True),
         "require_login": show.get("require_login", False),
+        "featured": featured,
         "whatsapp": profil.get("whatsapp", ""),
         "status": show.get("status", "ended"),
         "products": prods,
@@ -563,6 +591,9 @@ async def live_current():
 @api_router.post("/live/start")
 async def live_start(payload: LiveStart, admin: dict = Depends(require_admin)):
     await db.live_shows.update_many({"status": "live"}, {"$set": {"status": "ended", "ended_at": datetime.now(timezone.utc)}})
+    featured = payload.featured_product_id
+    if featured and featured not in payload.product_ids:
+        featured = None
     show = {
         "id": f"live_{uuid.uuid4().hex[:12]}",
         "channel": LIVE_CHANNEL,
@@ -571,25 +602,86 @@ async def live_start(payload: LiveStart, admin: dict = Depends(require_admin)):
         "product_ids": payload.product_ids,
         "show_cart": bool(payload.show_cart),
         "require_login": bool(payload.require_login),
+        "featured_product_id": featured,
         "status": "live",
         "host_uid": 1,
         "started_at": datetime.now(timezone.utc),
     }
     await db.live_shows.insert_one(show)
-    LIVE_CHAT_BUFFER.clear()
+    _reset_live_state()
     doc = await db.live_shows.find_one({"id": show["id"]}, {"_id": 0})
     await sio.emit("live_status", {"live": True, "channel": LIVE_CHANNEL})
     return {"live": True, **(await live_public(doc))}
 
 
+@api_router.post("/live/feature")
+async def live_feature(payload: LiveFeature, admin: dict = Depends(require_admin)):
+    show = await db.live_shows.find_one({"status": "live"})
+    if not show:
+        raise HTTPException(status_code=400, detail="Tidak ada siaran live")
+    fid = payload.product_id
+    if fid and fid not in (show.get("product_ids") or []):
+        raise HTTPException(status_code=400, detail="Produk tidak ada di daftar live")
+    await db.live_shows.update_one({"id": show["id"]}, {"$set": {"featured_product_id": fid}})
+    featured = None
+    if fid:
+        fdoc = await db.products.find_one({"id": fid, "deleted_at": None}, {"_id": 0})
+        if fdoc:
+            featured = product_public(fdoc)
+    await sio.emit("live_feature", {"featured": featured}, room=["live", "admins"])
+    return {"featured": featured}
+
+
+async def _build_recap(show: dict) -> dict:
+    started = show.get("started_at")
+    ended = show.get("ended_at") or datetime.now(timezone.utc)
+    orders_count = 0
+    orders_total = 0.0
+    if started:
+        cur = db.orders.find({"created_at": {"$gte": started, "$lte": ended}}, {"_id": 0, "total": 1})
+        async for o in cur:
+            orders_count += 1
+            orders_total += float(o.get("total") or 0)
+    return {
+        "peak_viewers": int(LIVE_STATS.get("peak_viewers", 0)),
+        "total_likes": int(LIVE_STATS.get("total_likes", 0)),
+        "orders_count": orders_count,
+        "orders_total": orders_total,
+    }
+
+
 @api_router.post("/live/stop")
 async def live_stop(admin: dict = Depends(require_admin)):
-    await db.live_shows.update_many({"status": "live"}, {"$set": {"status": "ended", "ended_at": datetime.now(timezone.utc)}})
-    LIVE_CHAT_BUFFER.clear()
-    LIVE_VIEWERS.clear()
+    show = await db.live_shows.find_one({"status": "live"})
+    ended_at = datetime.now(timezone.utc)
+    if show:
+        show["ended_at"] = ended_at
+        recap = await _build_recap(show)
+        await db.live_shows.update_one(
+            {"id": show["id"]},
+            {"$set": {"status": "ended", "ended_at": ended_at, "recap": recap}},
+        )
+    else:
+        await db.live_shows.update_many({"status": "live"}, {"$set": {"status": "ended", "ended_at": ended_at}})
+    _reset_live_state()
     await sio.emit("live_status", {"live": False})
     await sio.emit("live_viewers", {"count": 0, "viewers": []}, room=["live", "admins"])
     return {"live": False}
+
+
+@api_router.get("/admin/live-history")
+async def live_history(admin: dict = Depends(require_admin)):
+    docs = await db.live_shows.find({"status": "ended"}, {"_id": 0}).sort("started_at", -1).to_list(50)
+    out = []
+    for d in docs:
+        out.append({
+            "id": d.get("id"),
+            "title": d.get("title", "Live Shopping"),
+            "started_at": d["started_at"].isoformat() if d.get("started_at") else None,
+            "ended_at": d["ended_at"].isoformat() if d.get("ended_at") else None,
+            "recap": d.get("recap") or {"peak_viewers": 0, "total_likes": 0, "orders_count": 0, "orders_total": 0},
+        })
+    return out
 
 
 @api_router.get("/live/token")
@@ -1546,35 +1638,46 @@ async def message(sid, data):
     await sio.emit("message", chat_public(doc), room=[room, "admins"])
 
 
-# ---- Live shopping realtime (chat + reactions, open to guests) ----
-# Tracks who is currently watching the live: sid -> {name, role, user_id}
-LIVE_VIEWERS: dict = {}
-
-
+# ---- Live shopping realtime (chat + reactions + moderation, open to guests) ----
 async def _emit_live_viewers() -> None:
-    # Dedup logged-in users by user_id; guests each count once.
+    # Dedup by user_id (guest user_ids are unique per connection).
     seen: dict = {}
     order: list = []
     for v in LIVE_VIEWERS.values():
-        key = v["user_id"] if v.get("role") != "guest" else f"g:{id(v)}"
-        if key not in seen:
-            seen[key] = {"name": v.get("name") or "Tamu", "role": v.get("role", "guest")}
-            order.append(seen[key])
-    payload = {"count": len(order), "viewers": order}
-    await sio.emit("live_viewers", payload, room=["live", "admins"])
+        uid = v.get("user_id")
+        if uid in seen:
+            continue
+        entry = {"name": v.get("name") or "Tamu", "role": v.get("role", "guest"), "uid": uid, "muted": uid in LIVE_MUTED}
+        seen[uid] = entry
+        order.append(entry)
+    if len(order) > LIVE_STATS.get("peak_viewers", 0):
+        LIVE_STATS["peak_viewers"] = len(order)
+    await sio.emit("live_viewers", {"count": len(order), "viewers": order}, room=["live", "admins"])
+
+
+async def _sids_for_uid(uid: str) -> list:
+    return [s for s, v in LIVE_VIEWERS.items() if v.get("user_id") == uid]
 
 
 @sio.event
 async def join_live(sid, data):
-    await sio.enter_room(sid, "live")
     session = await sio.get_session(sid)
+    uid = session.get("user_id")
+    if uid in LIVE_KICKED:
+        await sio.emit("live_kicked", {}, to=sid)
+        return
+    await sio.enter_room(sid, "live")
     LIVE_VIEWERS[sid] = {
         "name": session.get("nama") or session.get("username") or "Tamu",
         "role": session.get("role", "guest"),
-        "user_id": session.get("user_id"),
+        "user_id": uid,
     }
     if LIVE_CHAT_BUFFER:
         await sio.emit("live_chat_history", LIVE_CHAT_BUFFER[-50:], to=sid)
+    if LIVE_PINNED:
+        await sio.emit("live_pinned", {"pinned": LIVE_PINNED}, to=sid)
+    if uid in LIVE_MUTED:
+        await sio.emit("live_muted", {"muted": True}, to=sid)
     await _emit_live_viewers()
 
 
@@ -1594,12 +1697,17 @@ async def disconnect(sid):
 @sio.event
 async def live_chat(sid, data):
     session = await sio.get_session(sid)
+    uid = session.get("user_id")
+    if uid in LIVE_KICKED or uid in LIVE_MUTED:
+        await sio.emit("live_muted", {"muted": True}, to=sid)
+        return
     text = ((data or {}).get("text") or "").strip()[:300]
     if not text:
         return
     name = ((data or {}).get("name") or session.get("nama") or "Tamu").strip()[:40] or "Tamu"
     msg = {
         "id": uuid.uuid4().hex[:12],
+        "uid": uid,
         "name": name,
         "role": session.get("role", "guest"),
         "text": text,
@@ -1608,7 +1716,7 @@ async def live_chat(sid, data):
     LIVE_CHAT_BUFFER.append(msg)
     if len(LIVE_CHAT_BUFFER) > 100:
         del LIVE_CHAT_BUFFER[: len(LIVE_CHAT_BUFFER) - 100]
-    await sio.emit("live_chat", msg, room="live")
+    await sio.emit("live_chat", msg, room=["live", "admins"])
 
 
 LIVE_REACTIONS = {"❤️", "👍", "😍", "🔥", "👏", "😮"}
@@ -1619,7 +1727,73 @@ async def live_react(sid, data):
     emoji = (data or {}).get("emoji") or "❤️"
     if emoji not in LIVE_REACTIONS:
         emoji = "❤️"
+    LIVE_STATS["total_likes"] = LIVE_STATS.get("total_likes", 0) + 1
     await sio.emit("live_react", {"emoji": emoji}, room="live")
+
+
+# ---- Admin moderation (pin / mute / kick) ----
+async def _is_admin_sid(sid) -> bool:
+    session = await sio.get_session(sid)
+    return session.get("role") == "admin"
+
+
+@sio.event
+async def pin_comment(sid, data):
+    global LIVE_PINNED
+    if not await _is_admin_sid(sid):
+        return
+    msg = (data or {}).get("message") or data or {}
+    pinned = {
+        "id": msg.get("id"),
+        "name": msg.get("name") or "Tamu",
+        "role": msg.get("role", "guest"),
+        "text": (msg.get("text") or "")[:300],
+    }
+    if not pinned["text"]:
+        return
+    LIVE_PINNED = pinned
+    await sio.emit("live_pinned", {"pinned": pinned}, room=["live", "admins"])
+
+
+@sio.event
+async def unpin_comment(sid, data):
+    global LIVE_PINNED
+    if not await _is_admin_sid(sid):
+        return
+    LIVE_PINNED = None
+    await sio.emit("live_pinned", {"pinned": None}, room=["live", "admins"])
+
+
+@sio.event
+async def mod_mute(sid, data):
+    if not await _is_admin_sid(sid):
+        return
+    uid = (data or {}).get("uid")
+    mute = bool((data or {}).get("mute", True))
+    if not uid:
+        return
+    if mute:
+        LIVE_MUTED.add(uid)
+    else:
+        LIVE_MUTED.discard(uid)
+    for s in await _sids_for_uid(uid):
+        await sio.emit("live_muted", {"muted": mute}, to=s)
+    await _emit_live_viewers()
+
+
+@sio.event
+async def mod_kick(sid, data):
+    if not await _is_admin_sid(sid):
+        return
+    uid = (data or {}).get("uid")
+    if not uid:
+        return
+    LIVE_KICKED.add(uid)
+    for s in await _sids_for_uid(uid):
+        await sio.emit("live_kicked", {}, to=s)
+        await sio.leave_room(s, "live")
+        LIVE_VIEWERS.pop(s, None)
+    await _emit_live_viewers()
 
 
 # Wrap FastAPI with Socket.IO. Uvicorn serves this combined `app`.

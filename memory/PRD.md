@@ -186,3 +186,25 @@ Inter body. Language: Indonesian.
   "Penonton (n)" berisi daftar nama (👑 admin / Tamu). Viewer `/live`: pill mata + angka di
   samping badge LIVE. Diverifikasi via socket.io client probe (guest join -> admin count=1 +
   nama; disconnect -> count=0) & screenshot admin modal.
+
+## Implemented (2026-06 fork — Live: sorot produk, pin, moderasi, rekap)
+- **Sorot Produk (featured)**: `live_shows.featured_product_id`. `LiveStart` + `POST /api/live/feature`
+  (admin) untuk ganti saat live -> emit `live_feature`. `live_public` kirim `featured` (produk penuh).
+  Admin: chip pemilih sorot saat live (+ bintang di picker saat setup). Viewer: bar "⭐ DISOROT"
+  dengan tombol **Beli Sekarang** -> tamu diarahkan `/login`, user login -> detail produk `/produk/[id]`.
+- **Pin Komentar**: socket `pin_comment`/`unpin_comment` (admin only) -> emit `live_pinned`
+  {pinned} ke ["live","admins"]; dikirim ke sid baru saat join. Banner pinned di viewer (atas chat)
+  & admin (tombol unpin). `LIVE_PINNED` in-memory.
+- **Blokir Penonton (bisukan + keluarkan)**: socket `mod_mute` {uid,mute} & `mod_kick` {uid}
+  (admin only). `LIVE_MUTED`/`LIVE_KICKED` set (by user_id; tamu uid=`guest_{sid}`). Muted ->
+  `live_chat` ditolak + emit `live_muted` (viewer input jadi "Anda dibisukan admin"). Kick -> keluar
+  room + `live_kicked` (viewer layar "Anda dikeluarkan") + tolak rejoin. Aksi di modal Penonton
+  (mic/kick) & tiap komentar di panel admin.
+- **Panel Komentar Admin**: admin terima `live_chat` lewat room "admins" (tanpa join_live -> tak
+  terhitung penonton); msg bawa `uid` utk moderasi; admin bisa balas komentar.
+- **Rekap Live**: `LIVE_STATS` {peak_viewers,total_likes} in-memory. Saat `live/stop` hitung pesanan
+  (count+total) rentang started..ended, simpan `recap` di doc. `GET /api/admin/live-history`
+  (admin). Layar `/dashboard/live-rekap` (drawer "Rekap Live").
+- Nonton tanpa install: link `${BASE}/live` jalan di browser HP untuk tamu (Expo web).
+- Diverifikasi: socket probe (featured start/change, guest chat->admin, pin, mute+block chat,
+  kick+remove viewer, recap) + screenshot viewer (bar sorot) & admin (chips sorot, panel komentar, rekap).

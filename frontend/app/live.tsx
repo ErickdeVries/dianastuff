@@ -45,7 +45,13 @@ export default function LiveViewerScreen() {
   const [text, setText] = useState("");
   const [floats, setFloats] = useState<{ key: string; emoji: string; offset: number }[]>([]);
   const [viewerCount, setViewerCount] = useState(0);
+  const [pinned, setPinned] = useState<{ name: string; role: string; text: string } | null>(null);
+  const [muted, setMuted] = useState(false);
+  const [kicked, setKicked] = useState(false);
+  const [featuredLive, setFeaturedLive] = useState<LiveProduct | null | undefined>(undefined);
   const chatRef = useRef<FlatList<LiveChatMsg>>(null);
+
+  const featured = featuredLive !== undefined ? featuredLive : data?.featured ?? null;
 
   const gated = !!data?.require_login && !user;
   const active = !!data?.live && !gated;
@@ -65,6 +71,14 @@ export default function LiveViewerScreen() {
         [...prev, { key: `${Date.now()}-${Math.random()}`, emoji: r?.emoji || "❤️", offset: Math.random() * 40 }].slice(-24),
       );
     const onViewers = (p: { count: number }) => alive && setViewerCount(p?.count ?? 0);
+    const onFeature = (p: { featured: LiveProduct | null }) => alive && setFeaturedLive(p?.featured ?? null);
+    const onPinned = (p: { pinned: { name: string; role: string; text: string } | null }) =>
+      alive && setPinned(p?.pinned ?? null);
+    const onMuted = (p: { muted: boolean }) => alive && setMuted(!!p?.muted);
+    const onKicked = () => {
+      if (!alive) return;
+      setKicked(true);
+    };
 
     (async () => {
       socket = await connectSocket();
@@ -75,6 +89,10 @@ export default function LiveViewerScreen() {
       socket.on("live_chat", onChat);
       socket.on("live_react", onReact);
       socket.on("live_viewers", onViewers);
+      socket.on("live_feature", onFeature);
+      socket.on("live_pinned", onPinned);
+      socket.on("live_muted", onMuted);
+      socket.on("live_kicked", onKicked);
     })();
 
     return () => {
@@ -86,6 +104,10 @@ export default function LiveViewerScreen() {
         socket.off("live_chat", onChat);
         socket.off("live_react", onReact);
         socket.off("live_viewers", onViewers);
+        socket.off("live_feature", onFeature);
+        socket.off("live_pinned", onPinned);
+        socket.off("live_muted", onMuted);
+        socket.off("live_kicked", onKicked);
       }
     };
   }, [active]);
@@ -121,6 +143,15 @@ export default function LiveViewerScreen() {
     if (data?.whatsapp) Linking.openURL(waLink(data.whatsapp));
   };
 
+  const onBuyFeatured = () => {
+    if (!featured) return;
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+    router.push({ pathname: "/produk/[id]", params: { id: featured.id } });
+  };
+
   // No live running.
   if (!isLoading && !data?.live) {
     return (
@@ -144,6 +175,20 @@ export default function LiveViewerScreen() {
         <Text style={styles.offSub}>Siaran ini khusus untuk pengguna terdaftar.</Text>
         <Pressable testID="live-login" style={styles.backToShop} onPress={() => router.push("/login")}>
           <Text style={styles.backToShopText}>Masuk / Daftar</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // Kicked out by admin.
+  if (kicked) {
+    return (
+      <View style={[styles.root, styles.center]}>
+        <MaterialDesignIcons name="account-cancel-outline" size={56} color={colors.error} />
+        <Text style={styles.offTitle}>Anda dikeluarkan</Text>
+        <Text style={styles.offSub}>Admin mengeluarkan Anda dari siaran live ini.</Text>
+        <Pressable style={styles.backToShop} onPress={() => router.replace("/toko")}>
+          <Text style={styles.backToShopText}>Ke Etalase</Text>
         </Pressable>
       </View>
     );
@@ -224,6 +269,15 @@ export default function LiveViewerScreen() {
 
         {/* Chat overlay */}
         <View style={styles.chatOverlay} pointerEvents="box-none">
+          {pinned ? (
+            <View style={styles.pinnedBanner}>
+              <MaterialDesignIcons name="pin" size={14} color="#fff" />
+              <Text style={styles.pinnedText} numberOfLines={2}>
+                <Text style={styles.pinnedName}>{pinned.role === "admin" ? "👑 " : ""}{pinned.name}: </Text>
+                {pinned.text}
+              </Text>
+            </View>
+          ) : null}
           <FlatList
             ref={chatRef}
             data={chat}
@@ -252,6 +306,30 @@ export default function LiveViewerScreen() {
         ))}
       </View>
 
+      {/* Featured product */}
+      {featured ? (
+        <View style={styles.featuredBar} testID="live-featured">
+          {(() => {
+            const uri = resolveImageUrl(featured.foto_urls?.[0] ?? null);
+            return uri ? (
+              <Image source={{ uri }} style={styles.featuredImg} contentFit="cover" />
+            ) : (
+              <View style={[styles.featuredImg, styles.pImgEmpty]}>
+                <MaterialDesignIcons name="image-off-outline" size={20} color="#fff" />
+              </View>
+            );
+          })()}
+          <View style={{ flex: 1 }}>
+            <Text style={styles.featuredTag}>⭐ DISOROT</Text>
+            <Text style={styles.featuredName} numberOfLines={1}>{featured.nama_produk}</Text>
+            <Text style={styles.featuredPrice}>{formatRupiah(featured.harga)}</Text>
+          </View>
+          <Pressable testID="live-buy-featured" style={styles.featuredBuy} onPress={onBuyFeatured}>
+            <Text style={styles.featuredBuyText}>Beli Sekarang</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       {/* Product strip */}
       {data?.show_cart && products.length ? (
         <View style={styles.strip}>
@@ -268,21 +346,28 @@ export default function LiveViewerScreen() {
 
       {/* Chat input */}
       <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
-        <View style={[styles.inputBar, { paddingBottom: insets.bottom + 10 }]}>
-          <TextInput
-            testID="live-chat-input"
-            style={styles.input}
-            placeholder="Tulis komentar..."
-            placeholderTextColor={colors.muted}
-            value={text}
-            onChangeText={setText}
-            onSubmitEditing={sendChat}
-            returnKeyType="send"
-          />
-          <Pressable testID="live-chat-send" style={styles.sendBtn} onPress={sendChat}>
-            <MaterialDesignIcons name="send" size={20} color={colors.onBrandPrimary} />
-          </Pressable>
-        </View>
+        {muted ? (
+          <View style={[styles.mutedBar, { paddingBottom: insets.bottom + 12 }]}>
+            <MaterialDesignIcons name="microphone-off" size={18} color={colors.muted} />
+            <Text style={styles.mutedText}>Anda dibisukan admin</Text>
+          </View>
+        ) : (
+          <View style={[styles.inputBar, { paddingBottom: insets.bottom + 10 }]}>
+            <TextInput
+              testID="live-chat-input"
+              style={styles.input}
+              placeholder="Tulis komentar..."
+              placeholderTextColor={colors.muted}
+              value={text}
+              onChangeText={setText}
+              onSubmitEditing={sendChat}
+              returnKeyType="send"
+            />
+            <Pressable testID="live-chat-send" style={styles.sendBtn} onPress={sendChat}>
+              <MaterialDesignIcons name="send" size={20} color={colors.onBrandPrimary} />
+            </Pressable>
+          </View>
+        )}
       </KeyboardStickyView>
     </View>
   );
@@ -318,10 +403,21 @@ const useStyles = makeStyles((colors) => ({
   reactEmoji: { fontSize: 20 },
   likeBtn: { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
 
-  chatOverlay: { position: "absolute", left: 12, right: 72, bottom: 12, maxHeight: 190 },
+  chatOverlay: { position: "absolute", left: 12, right: 72, bottom: 12, maxHeight: 220 },
+  pinnedBanner: { flexDirection: "row", alignItems: "flex-start", gap: 6, backgroundColor: "rgba(168,85,247,0.85)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 7, marginBottom: 4 },
+  pinnedText: { flex: 1, fontFamily: fonts.body, fontSize: 13, color: "#fff" },
+  pinnedName: { fontFamily: fonts.bodyMedium, color: "#fff" },
   chatBubble: { alignSelf: "flex-start", backgroundColor: "rgba(0,0,0,0.4)", borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, maxWidth: "100%" },
   chatName: { fontFamily: fonts.bodyMedium, fontSize: 13, color: "#FFD9F3" },
   chatText: { fontFamily: fonts.body, fontSize: 13, color: "#fff" },
+
+  featuredBar: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.brandTertiary, paddingHorizontal: 12, paddingVertical: 10 },
+  featuredImg: { width: 52, height: 52, borderRadius: 10, backgroundColor: colors.surfaceTertiary },
+  featuredTag: { fontFamily: fonts.bodyMedium, fontSize: 10, color: colors.brandPrimary, letterSpacing: 0.5 },
+  featuredName: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onSurface },
+  featuredPrice: { fontFamily: fonts.heading, fontSize: 15, color: colors.brandPrimary },
+  featuredBuy: { backgroundColor: colors.brandPrimary, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 10 },
+  featuredBuyText: { fontFamily: fonts.bodyMedium, fontSize: 13, color: colors.onBrandPrimary },
 
   strip: { backgroundColor: colors.surface, paddingVertical: 10, flexDirection: "row", alignItems: "center" },
   pCard: { width: 120, backgroundColor: colors.surfaceSecondary, borderRadius: 14, padding: 8 },
@@ -334,4 +430,6 @@ const useStyles = makeStyles((colors) => ({
   inputBar: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingTop: 10, backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.divider },
   input: { flex: 1, fontFamily: fonts.body, fontSize: 15, color: colors.onSurface, backgroundColor: colors.surfaceTertiary, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10 },
   sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  mutedBar: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 12, paddingTop: 12, backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.divider },
+  mutedText: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.muted },
 }));

@@ -17,10 +17,26 @@ export type LiveState = {
   caption?: string;
   show_cart?: boolean;
   require_login?: boolean;
+  featured?: LiveProduct | null;
   whatsapp?: string;
   status?: string;
   products?: LiveProduct[];
   started_at?: string | null;
+};
+
+export type LiveRecap = {
+  peak_viewers: number;
+  total_likes: number;
+  orders_count: number;
+  orders_total: number;
+};
+
+export type LiveHistoryItem = {
+  id: string;
+  title: string;
+  started_at: string | null;
+  ended_at: string | null;
+  recap: LiveRecap;
 };
 
 export type LiveToken = {
@@ -46,6 +62,7 @@ export type StartLiveOptions = {
   productIds: string[];
   showCart?: boolean;
   requireLogin?: boolean;
+  featuredProductId?: string | null;
 };
 
 export function startLive(opts: StartLiveOptions): Promise<LiveState> {
@@ -57,8 +74,17 @@ export function startLive(opts: StartLiveOptions): Promise<LiveState> {
       product_ids: opts.productIds,
       show_cart: opts.showCart ?? true,
       require_login: opts.requireLogin ?? false,
+      featured_product_id: opts.featuredProductId ?? null,
     },
   });
+}
+
+export function setFeatured(productId: string | null): Promise<{ featured: LiveProduct | null }> {
+  return apiRequest("/api/live/feature", { method: "POST", body: { product_id: productId } });
+}
+
+export function getLiveHistory(): Promise<LiveHistoryItem[]> {
+  return apiRequest<LiveHistoryItem[]>("/api/admin/live-history");
 }
 
 export function stopLive(): Promise<{ live: boolean }> {
