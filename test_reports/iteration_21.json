@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 21 — VERIFY 3 live/sharing bug fixes on PREVIEW URL (https://diana-store-2.preview.emergentagent.com, mobile viewport 390x844). Started a live via API (admin/admin123 whitelist -> POST /api/live/start with 3 products + featured Dress Floral). (1) HOST BLANK SCREEN: PASS — /live-host on web shows the informative message 'Kamera siaran hanya aktif di aplikasi HP (APK)' + subtitle on a dark purple panel (NOT plain black); host overlays (host-chat-input, host-share, host-stop, host-viewers) all render. Native fix verified by code review: live-video.native.tsx:156 renders local preview with canvas uid 0 while host joins with selfUid=1 (correct Agora convention). (2) FULL-SCREEN /live: PASS — audience video div measured exactly 390x844 at top:0/left:0 (fills whole screen); chat renders as transparent bubbles (rgba(0,0,0,0.4)) floating over video; 'DISOROT' featured bar (rgba(233,213,255,0.94)) floats above the product strip; chat input translucent rgba(255,255,255,0.16); reaction rail + heart FAB on the right; NO solid white/colored blocks break the video area. Guest chat message sent & rendered ('Tamu: Halo kak, test guest chat!'), like tapped, viewer pill showed 1, live-share tapped with no errors. (3) SHARE LINKS: PASS — src/utils/links.ts PUBLIC_WEB_URL='https://dianastuff.com' is used by app/live.tsx:133, app/live-host.tsx:140, app/produk/[id].tsx:65, app/webview.tsx:19 (grep: zero remaining emergent.host/preview URLs in share paths); UI-verified webview iframe src = https://dianastuff.com/toko via buyer home 'Toko (Versi Web)' button. REGRESSION: PASS — guest 'Beli Sekarang' on featured product redirects to /login; /toko renders products + 'Sedang LIVE' banner; / landing renders for guest. CLEANUP: POST /api/live/stop done, /api/live/current returns live:false. No deprecated Expo packages in reviewed files.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/screenshots/iter21_live_guest.jpeg",
+    "/app/test_reports/screenshots/iter21_live_host_web.jpeg",
+    "/app/test_reports/screenshots/iter21_webview.jpeg",
+    "/app/test_reports/screenshots/iter21_toko.jpeg",
+    "/app/test_reports/screenshots/iter21_landing.jpeg"
+  ],
+  "action_items": [
+    "None blocking. User can re-upload the current web bundle to Cloudflare Pages — all 3 fixes verified working on the preview build.",
+    "Note (by design, not a bug): the 'Toko (Versi Web)' webview button only renders for buyers on /home (home.tsx:70-101); admins see 'Buka Dashboard Admin' instead.",
+    "Note: src/context/auth.tsx:51 uses https://auth.emergentagent.com/ — that is the legitimate Emergent Google OAuth endpoint, NOT a share link; leave as-is."
+  ],
+  "critical_code_review_comments": [
+    "live-video.native.tsx: host joins with selfUid=1 but local preview canvas uses uid 0 (line 156: showUid = role==='host' ? 0 : remoteUid) — correct Agora convention; fixes the black host preview on native builds. Not runtime-testable on web (no camera), code-verified only.",
+    "live.tsx bottomCol/chatRow/strip/inputBar are all position:absolute transparent overlays over the absolute-fill LiveVideo — layout matches the full-screen requirement.",
+    "live-host.tsx:176-289 wraps video+overlays in videoWrap (flex:1, overflow hidden) with input bar below — host web message panel renders correctly.",
+    "webview.tsx falls back to a real iframe on web (react-native-web has no WebView) — verified src=https://dianastuff.com/toko."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_21.json (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (login-whitelist, /api/live/start with featured, /api/live/current, /api/live/stop — all 200 with correct payloads; frontend-only scope)",
+    "frontend": "100% (full-screen /live guest layout + guest chat + like + Beli Sekarang->/login, host web informative message, share links->dianastuff.com, webview iframe, /toko, / landing)"
+  },
+  "seed_data_creation": "Started one live show ('Live Shopping Malam Ini', 3 products, featured Dress Floral) for testing; STOPPED after tests (live:false confirmed). Guest chat test message was in-memory only and cleared on live stop.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 3 reported bugs verified FIXED on preview. The native host camera preview (uid 0 fix) can only be fully validated on a native Android build, not web/Expo Go. Buyer login redirects to /toko (not /home); navigate to /home explicitly to find webview-button (buyer-only). Live state is fully in-memory + single-tenant; always POST /api/live/stop after tests. Admin: admin/admin123, buyer: buyer123.",
+  "rca_of_issue": "All 3 fixes verified: (1) host black preview — root cause was RtcSurfaceView canvas using selfUid=1 while Agora local preview requires uid 0; fixed in live-video.native.tsx + web fallback message in live-video.web.tsx (verified in UI). (2) /live not full-screen — root cause was solid layout blocks (featured bar, product strip, input bar) stacked below the video; fixed by absolute-fill video + transparent floating overlays (verified by DOM measurement 390x844 and screenshot). (3) share links pointed to Emergent backend domain — fixed via src/utils/links.ts PUBLIC_WEB_URL=https://dianastuff.com consumed by live.tsx, live-host.tsx, produk/[id].tsx, webview.tsx (grep + UI iframe src verified)."
+}

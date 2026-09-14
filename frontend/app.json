@@ -22,7 +22,7 @@
         "backgroundColor": "#000000"
       },
       "package": "com.dianastuff.app",
-      "permissions": ["READ_MEDIA_IMAGES", "CAMERA", "RECORD_AUDIO", "MODIFY_AUDIO_SETTINGS"]
+      "permissions": ["READ_MEDIA_IMAGES", "CAMERA", "RECORD_AUDIO", "MODIFY_AUDIO_SETTINGS", "ACCESS_NETWORK_STATE", "ACCESS_WIFI_STATE", "BLUETOOTH", "BLUETOOTH_CONNECT"]
     },
     "web": {
       "bundler": "metro",

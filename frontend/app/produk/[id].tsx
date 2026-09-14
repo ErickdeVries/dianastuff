@@ -13,6 +13,7 @@ import { useToast } from "@/src/context/toast";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { formatDate, formatRupiah } from "@/src/utils/format";
 import { resolveImageUrl } from "@/src/utils/image";
+import { PUBLIC_WEB_URL } from "@/src/utils/links";
 
 type Product = {
   id: string;
@@ -30,7 +31,6 @@ type ReviewItem = { rating: number; komentar: string; foto_url?: string | null; 
 type Reviews = { average: number; count: number; items: ReviewItem[] };
 
 const { width: SCREEN_W } = Dimensions.get("window");
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 export default function ProductDetail() {
   const styles = useStyles();
@@ -62,7 +62,7 @@ export default function ProductDetail() {
 
   const onShare = async () => {
     if (!product) return;
-    const link = `${BASE}/produk/${product.id}`;
+    const link = `${PUBLIC_WEB_URL}/produk/${product.id}`;
     const msg = `${product.nama_produk} - ${formatRupiah(product.harga)}\nLihat di sini: ${link}`;
     try {
       await Share.share({ message: msg });

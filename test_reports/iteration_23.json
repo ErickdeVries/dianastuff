@@ -1,0 +1,35 @@
+{
+  "summary": "Iter23 retest (code review + web smoke) of iter22 HIGH bug fixes — ALL PASS. CODE REVIEW of /app/frontend/src/components/live-video.native.tsx: (a) host canvas uid === join uid: selfUid=1 for host (L38-40), joinChannel uses selfUid (L133), canvas uid=showUid=selfUid with sourceType VideoSourceCamera (L174, L184-187) — CORRECT. (b) audience canvas uses uid=remoteUid with sourceType VideoSourceRemote (L174, L186-187) — the iter22 HIGH bug is FIXED; per SDK getFuncName routing, VideoSourceRemote now correctly routes to setupRemoteVideo. (c) startPreview() return code checked: rc===0 -> setPreviewReady(true), else readable error 'Kamera gagal dibuka (kode X). Tutup aplikasi lain yang memakai kamera lalu coba lagi.' (L126-131); previewReady no longer set blindly — FIXED. (d) No regressions vs official Agora RN playbook: permissions check -> getLiveToken -> createAgoraRtcEngine -> initialize -> registerEventHandler (incl. onError/onTokenPrivilegeWillExpire) -> enableVideo -> startPreview (host only) -> joinChannel with LiveBroadcasting + Broadcaster/Audience + publish flags; full cleanup (stopPreview/leaveChannel/unregisterEventHandler/release); canShow gates audience on joined && remoteUid != null. app.json android.permissions CONFIRMED: includes BLUETOOTH_CONNECT alongside BLUETOOTH, CAMERA, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, ACCESS_NETWORK_STATE, ACCESS_WIFI_STATE, READ_MEDIA_IMAGES. WEB SMOKE PASS: guest /live shows intact full-screen 'Belum ada siaran live' layout; admin login (admin/admin123) works; /live-host shows host fallback message 'Kamera siaran hanya aktif di aplikasi HP (APK)' with LIVE badge, viewer count, action overlays and chat bar — no black screen. Backend suites not re-run per request.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/screenshots/iter23_guest_live.png",
+    "/app/test_reports/screenshots/iter23_live_host.png"
+  ],
+  "action_items": [
+    "All iter22 action items resolved — safe to rebuild the APK. Native host preview + native audience rendering both follow the official Agora RN playbook now.",
+    "OPTIONAL (not a regression): if startPreview() returns non-zero, joinChannel still proceeds (host joins but publishes no video). Error is surfaced to the user, so acceptable; could gate join on rc===0 in a future polish pass."
+  ],
+  "critical_code_review_comments": [
+    "Iter22 HIGH fix verified: audience RtcSurfaceView canvas now uses sourceType conditional by role (host: VideoSourceCamera, audience: VideoSourceRemote) at live-video.native.tsx:184-187 — matches SDK routing in IAgoraRtcRenderView.getFuncName.",
+    "startPreview return-code check at live-video.native.tsx:126-131 verified; previewReady only set on rc===0 and failure path shows Indonesian readable error instead of black canvas.",
+    "Host UID consistency intact: join uid=1 === canvas uid=1; backend live_shows.host_uid=1 contract preserved (verified in iter22 pytest).",
+    "app.json:25 permissions now include BLUETOOTH_CONNECT (Android 12+ headset audio) — confirmed present.",
+    "No new deprecated packages; runtime require of react-native-agora remains intentional for Expo Go/web safety."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not run (per request)", "frontend": "100% (code review 4/4 checks + web smoke 2/2 screens)"},
+  "seed_data_creation": "None. No live show was started; guest screen correctly showed 'Belum ada siaran live'.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter22 HIGH audience-black-screen bug fully resolved and verified by code review (camera untestable on web). Next step is an APK rebuild + on-device validation of host preview and guest rendering. Web preview env: landing page 'Masuk' button -> login screen -> 'Login Whitelist' tab -> admin/admin123. Guest /live joins Agora web SDK channel dianastuff_live even with no active show (harmless).",
+  "rca_of_issue": "Iter22 bug: audience canvas passed VideoSourceCamera for the remote uid, routing to setupLocalVideo (black screen for native guests). Fix verified: sourceType is now conditional by role — VideoSourceRemote for audience routes to setupRemoteVideo per SDK source. startPreview failure now surfaces a readable error instead of a silent black preview. BLUETOOTH_CONNECT added for Android 12+ audio routing. No residual issues found."
+}

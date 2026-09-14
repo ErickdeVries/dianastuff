@@ -1,0 +1,55 @@
+{
+  "summary": "Iter22 (native host black-preview fix): Backend 7/7 pytest PASS on preview backend (admin login, live start host_uid=1, public current, audience token public, host token admin-only + uid=1, stop verified). Web smoke PASS: /live-host shows informative 'Kamera siaran hanya aktif di aplikasi HP (APK)' message + LIVE badge/stop/share overlays (not plain black); guest /live overlay intact, realtime viewer count 0->1 confirmed on host screen, guest chat sent & visible. Share-link regression PASS: all share paths use PUBLIC_WEB_URL=https://dianastuff.com, zero emergent refs. PRODUCTION guest E2E PASS: fresh unauthenticated context on https://dianastuff.com/live joined the running show, sent chat successfully; deployed bundle calls PRODUCTION backend (diana-store-2.emergent.host), NOT preview. All test lives stopped & verified. CODE REVIEW of live-video.native.tsx: host path now matches official Agora RN playbook (permissions checked, initialize->registerEventHandler(onError/onTokenPrivilegeWillExpire)->enableVideo->startPreview->joinChannel uid=1, canvas uid===selfUid + VideoSourceCamera, preview on previewReady, full cleanup). FOUND ONE HIGH BUG in the AUDIENCE native path: RtcSurfaceView for remote uid passes sourceType=VideoSourceCamera, and the SDK's internal getFuncName routes any defined sourceType != VideoSourceRemote to setupLocalVideo -> native guests would see BLACK. Verified against node_modules/react-native-agora/src/internal/IAgoraRtcRenderView.tsx lines 18-33 and official docs (remote must use VideoSourceRemote). Deprecated packages: none new (runtime-require of react-native-agora is intentional for Expo Go safety).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "live-video.native.tsx (audience path)",
+        "issue": "RtcSurfaceView canvas for the remote host uses sourceType=VideoSourceCamera. Per SDK source (node_modules/react-native-agora/src/internal/IAgoraRtcRenderView.tsx:24-28) any defined sourceType other than VideoSourceRemote routes to RtcEngine_setupLocalVideo, so native AUDIENCE would render black. Reference: /app/frontend/src/components/live-video.native.tsx:170-182. Fix: sourceType: role==='host' ? VideoSourceType.VideoSourceCamera : VideoSourceType.VideoSourceRemote (or omit sourceType for audience since uid!=0 already routes to setupRemoteVideo)."
+      },
+      {
+        "component": "live-video.native.tsx (host startPreview)",
+        "issue": "engine.startPreview() return code not checked (line 126); previewReady is set unconditionally. If camera is busy/fails, previewReady=true yields a black RtcSurfaceView with no error. Minor. Reference: /app/frontend/src/components/live-video.native.tsx:125-128."
+      },
+      {
+        "component": "app.json android.permissions",
+        "issue": "BLUETOOTH permission covers <=Android 11 only; Android 12+ (API 31+) needs BLUETOOTH_CONNECT for bluetooth-headset audio routing per Agora playbook. Cosmetic for camera preview. Reference: /app/frontend/app.json:25."
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_live_native_fix_iter22.py",
+    "/app/test_reports/pytest/pytest_iter22_live_native.xml",
+    "/app/test_reports/screenshots/iter22_host_web.png",
+    "/app/test_reports/screenshots/iter22_guest_live.jpeg",
+    "/app/test_reports/screenshots/iter22_prod_guest.jpeg"
+  ],
+  "action_items": [
+    "HIGH (before next APK rebuild): fix audience canvas in live-video.native.tsx -> use VideoSourceType.VideoSourceRemote for role==='audience' (or drop sourceType when uid is remote), else native guests get a black screen — same symptom class the user reported for host.",
+    "MINOR: check startPreview() return code and surface error instead of setting previewReady blindly.",
+    "MINOR: consider adding BLUETOOTH_CONNECT to app.json android.permissions for Android 12+ headset audio (per Agora playbook).",
+    "Host-path native fix itself is CORRECT per the official playbook — safe to rebuild APK after the audience fix."
+  ],
+  "critical_code_review_comments": [
+    "Host Agora sequence verified correct: PermissionsAndroid.requestMultiple + grant check, createAgoraRtcEngine, initialize({appId}), registerEventHandler (onJoinChannelSuccess/onUserJoined/onUserOffline/onError/onTokenPrivilegeWillExpire), enableVideo, startPreview, joinChannel(token, channel, uid=1, LiveBroadcasting+Broadcaster, publish cam/mic). Cleanup: stopPreview/leaveChannel/unregisterEventHandler/release.",
+    "UID consistency fixed correctly: join uid=1 (selfUid) and host canvas uid=selfUid with explicit VideoSourceCamera; backend live_shows.host_uid=1 and host token test with uid=1 passed.",
+    "app.json permissions complete: CAMERA, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, ACCESS_NETWORK_STATE, ACCESS_WIFI_STATE, BLUETOOTH + iOS NSCameraUsageDescription/NSMicrophoneUsageDescription present.",
+    "Share links: live.tsx, live-host.tsx, produk/[id].tsx, webview.tsx all use PUBLIC_WEB_URL (https://dianastuff.com); no emergent/preview domains anywhere in share paths.",
+    "Deployed dianastuff.com bundle already targets the PRODUCTION backend (observed network calls to diana-store-2.emergent.host) — earlier concern about stale bundle pointing to preview is resolved."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_live_native_fix_iter22.py"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% web (preview host msg + guest overlay/chat + production guest join/chat)"},
+  "seed_data_creation": "Started/stopped test live shows 'TEST_iter22_live', 'TEST iter22 web smoke', 'TEST iter22 guest chat', 'TEST iter22 prod guest e2e' on preview and production backends; ALL stopped and verified live:false. No residual data.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Native camera cannot be tested on web. The host-path fix is verified correct by code review against react-native-agora 4.6.4 SDK source + official docs. ONE remaining HIGH native bug: audience canvas sourceType must be VideoSourceRemote (IAgoraRtcRenderView.getFuncName routes defined sourceType!=Remote to setupLocalVideo). After E1 fixes it, next APK rebuild should fix host preview AND prevent the same black-screen for native guests. Guest E2E on dianastuff.com works: deployed bundle points at production backend; guests can watch overlay + chat without login. bash tool outputs in this env intermittently cross with other sessions — redirect to files and read via view_file.",
+  "rca_of_issue": "User-reported host black preview: root cause was join/canvas UID mismatch (uid 1 vs 0) + preview gated on channel join — now fixed and verified in code. Remaining latent bug found this round: audience path reuses the same canvas object with sourceType=VideoSourceCamera for the REMOTE uid; SDK internal getFuncName (node_modules/react-native-agora/src/internal/IAgoraRtcRenderView.tsx:18-33) treats any defined non-Remote sourceType as setupLocalVideo, so native audience renders nothing (black). Mitigation: one-line sourceType conditional by role. Reproduction: install APK as guest, join a live -> black video area while web guests work."
+}

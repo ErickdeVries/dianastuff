@@ -1,8 +1,10 @@
 // Live video — WEB implementation (agora-rtc-sdk-ng). Audience only on web.
+import MaterialDesignIcons from "@react-native-vector-icons/material-design-icons";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { View } from "react-native";
+import { Text, View } from "react-native";
 
 import { getLiveToken } from "@/src/api/live";
+import { fonts } from "@/src/theme";
 
 export type LiveFilterId = "none" | "halus" | "cerah" | "vivid" | "jernih" | "lowlight";
 export type LiveQuality = "HD" | "normal" | "hemat";
@@ -20,6 +22,7 @@ export const LiveVideo = forwardRef<LiveVideoHandle, Props>(function LiveVideo({
   useImperativeHandle(ref, () => ({ switchCamera: () => {}, applyFilter: () => {}, setQuality: () => {} }), []);
 
   useEffect(() => {
+    if (role === "host") return; // host camera only on native build
     let client: any;
     let remoteTrack: any;
     let cancelled = false;
@@ -54,6 +57,22 @@ export const LiveVideo = forwardRef<LiveVideoHandle, Props>(function LiveVideo({
       } catch {}
     };
   }, [role]);
+
+  // Host camera preview tidak tersedia di web — tampilkan pesan informatif,
+  // bukan layar hitam kosong.
+  if (role === "host") {
+    return (
+      <View style={[{ flex: 1, backgroundColor: "#1A0F2E", alignItems: "center", justifyContent: "center", padding: 24 }, style]}>
+        <MaterialDesignIcons name="video-wireless-outline" size={44} color="#A855F7" />
+        <Text style={{ color: "#fff", fontFamily: fonts.bodyMedium, fontSize: 15, textAlign: "center", marginTop: 12 }}>
+          Kamera siaran hanya aktif di aplikasi HP (APK)
+        </Text>
+        <Text style={{ color: "#C9B8E8", fontFamily: fonts.body, fontSize: 13, textAlign: "center", marginTop: 6 }}>
+          Penonton tetap melihat Anda dari aplikasi. Layar ini hanya preview di browser.
+        </Text>
+      </View>
+    );
+  }
 
   // Render a native View wrapping a DOM node for the video.
   return (

@@ -6,8 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 
 import { fonts, makeStyles, useTheme } from "@/src/theme";
-
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
+import { PUBLIC_WEB_URL } from "@/src/utils/links";
 
 export default function WebViewScreen() {
   const styles = useStyles();
@@ -17,7 +16,7 @@ export default function WebViewScreen() {
   const params = useLocalSearchParams<{ path?: string; title?: string }>();
   const [loading, setLoading] = useState(true);
 
-  const url = `${BASE}${params.path || "/toko"}`;
+  const url = `${PUBLIC_WEB_URL}${params.path || "/toko"}`;
   const title = params.title || "Toko (Web)";
 
   return (

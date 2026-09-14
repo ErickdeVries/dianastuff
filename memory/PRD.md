@@ -321,3 +321,15 @@ Inter body. Language: Indonesian.
   identik sampai ID), pesanan 39=39. Pelanggan produksi 14 > lokal 7 (produksi = master).
   KESIMPULAN: data produksi sudah tersinkron, tidak ada yang perlu disalin.
 - Endpoint maintenance SUDAH DIHAPUS dari kode (hilang dari produksi pada redeploy berikutnya).
+
+## FIX (2026-09-14 — Host black preview di build + link join), iter22/23
+- Akar masalah host hitam (playbook Agora resmi): UID mismatch join(uid 1) vs canvas(uid 0/1),
+  sourceType tidak eksplisit, permission result tidak dicek, preview menunggu join.
+- FIX live-video.native.tsx: canvas uid === join uid + sourceType VideoSourceCamera (host) /
+  VideoSourceRemote (audience — BUG HIGH dari iter22, sempat salah pasang); startPreview dicek
+  return code (error terbaca di layar); onError handler; izin ditolak -> pesan jelas; garis
+  diagnostik kecil di layar host (cam/join/err). app.json + ACCESS_NETWORK_STATE/WIFI_STATE/
+  BLUETOOTH/BLUETOOTH_CONNECT.
+- Link share -> dianastuff.com via src/utils/links.ts (live, produk, webview "Toko Versi Web").
+  E2E tamu join dari https://dianastuff.com/live TERUJI berhasil (iter22).
+- WAJIB: build APK baru agar fix native ikut; web.zip tidak perlu rebuild (hanya native berubah).

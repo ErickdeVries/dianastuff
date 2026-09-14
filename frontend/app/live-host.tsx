@@ -15,8 +15,7 @@ import { useAuth } from "@/src/context/auth";
 import { useToast } from "@/src/context/toast";
 import { connectSocket } from "@/src/lib/socket";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
-
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
+import { PUBLIC_WEB_URL } from "@/src/utils/links";
 
 type LiveChatMsg = { id: string; uid?: string; name: string; role: string; text: string };
 type Viewer = { name: string; role: string; uid: string; muted: boolean };
@@ -138,7 +137,7 @@ export default function LiveHostScreen() {
   };
 
   const onShare = async () => {
-    const link = `${BASE}/live`;
+    const link = `${PUBLIC_WEB_URL}/live`;
     const msg = `🔴 LIVE sekarang di Diana Stuff! Nonton & belanja: ${link}`;
     try {
       await Share.share({ message: msg });

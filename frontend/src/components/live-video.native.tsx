@@ -34,6 +34,7 @@ export const LiveVideo = forwardRef<LiveVideoHandle, Props>(function LiveVideo({
   const engineRef = useRef<any>(null);
   const [remoteUid, setRemoteUid] = useState<number | null>(null);
   const [joined, setJoined] = useState(false);
+  const [previewReady, setPreviewReady] = useState(false);
   const [selfUid] = useState(() =>
     role === "host" ? 1 : Math.floor(Math.random() * 2_000_000_000) + 2,
   );
@@ -89,32 +90,46 @@ export const LiveVideo = forwardRef<LiveVideoHandle, Props>(function LiveVideo({
       return;
     }
     let engine: any;
+    let handler: any;
     (async () => {
       try {
         if (Platform.OS === "android") {
-          await PermissionsAndroid.requestMultiple([
+          const result = await PermissionsAndroid.requestMultiple([
             PermissionsAndroid.PERMISSIONS.CAMERA,
             PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
           ]);
+          const granted = Object.values(result).every(
+            (v) => v === PermissionsAndroid.RESULTS.GRANTED,
+          );
+          if (!granted) {
+            setErr("Izin kamera & mikrofon ditolak. Aktifkan di Pengaturan HP lalu coba lagi.");
+            return;
+          }
         }
         const t = await getLiveToken(role, selfUid);
         engine = Agora.createAgoraRtcEngine();
         engineRef.current = engine;
-        engine.initialize({
-          appId: t.appId,
-          channelProfile: Agora.ChannelProfileType.ChannelProfileLiveBroadcasting,
-        });
-        engine.registerEventHandler({
+        engine.initialize({ appId: t.appId });
+        handler = {
           onJoinChannelSuccess: () => setJoined(true),
           onUserJoined: (_c: any, uid: number) => setRemoteUid(uid),
           onUserOffline: () => setRemoteUid(null),
+          onError: (code: number, msg: string) => setErr(`Agora error ${code}: ${msg || ""}`),
           onTokenPrivilegeWillExpire: async () => {
             const fresh = await getLiveToken(role, selfUid);
             engine.renewToken(fresh.token);
           },
-        });
+        };
+        engine.registerEventHandler(handler);
         engine.enableVideo();
-        if (role === "host") engine.startPreview();
+        if (role === "host") {
+          const rc = engine.startPreview();
+          if (rc === 0) {
+            setPreviewReady(true);
+          } else {
+            setErr(`Kamera gagal dibuka (kode ${rc}). Tutup aplikasi lain yang memakai kamera lalu coba lagi.`);
+          }
+        }
         engine.joinChannel(t.token, t.channel, selfUid, {
           channelProfile: Agora.ChannelProfileType.ChannelProfileLiveBroadcasting,
           clientRoleType:
@@ -133,7 +148,9 @@ export const LiveVideo = forwardRef<LiveVideoHandle, Props>(function LiveVideo({
 
     return () => {
       try {
+        engine?.stopPreview?.();
         engine?.leaveChannel();
+        if (handler) engine?.unregisterEventHandler(handler);
         engine?.release();
       } catch {}
       engineRef.current = null;
@@ -152,21 +169,44 @@ export const LiveVideo = forwardRef<LiveVideoHandle, Props>(function LiveVideo({
   }
 
   const RtcSurfaceView = Agora?.RtcSurfaceView;
+  // UID HARUS sama antara joinChannel dan canvas render (panduan resmi Agora),
+  // plus sourceType kamera eksplisit untuk preview lokal host.
   const showUid = role === "host" ? selfUid : remoteUid;
+  const canShow = role === "host" ? previewReady : joined && remoteUid != null;
 
   return (
     <View style={[{ backgroundColor: "#000" }, style]}>
-      {RtcSurfaceView && joined && showUid != null ? (
-        <RtcSurfaceView canvas={{ uid: showUid }} style={{ flex: 1 }} />
+      {RtcSurfaceView && canShow && showUid != null ? (
+        <RtcSurfaceView
+          canvas={{
+            uid: showUid,
+            // Host = kamera lokal; penonton = stream REMOTE host (wajib beda sourceType!).
+            sourceType:
+              role === "host"
+                ? Agora.VideoSourceType?.VideoSourceCamera
+                : Agora.VideoSourceType?.VideoSourceRemote,
+          }}
+          style={{ flex: 1 }}
+        />
       ) : (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 20 }}>
           <MaterialDesignIcons name="access-point" size={40} color={colors.brandPrimary} />
-          <Text style={{ color: "#fff", fontFamily: fonts.body, marginTop: 8 }}>
+          <Text style={{ color: "#fff", fontFamily: fonts.body, marginTop: 8, textAlign: "center" }}>
             {role === "host" ? "Menyiapkan kamera..." : "Menunggu siaran host..."}
           </Text>
-          {err ? <Text style={{ color: "#f88", fontFamily: fonts.body, marginTop: 6, fontSize: 12 }}>{err}</Text> : null}
+          {err ? (
+            <Text style={{ color: "#f88", fontFamily: fonts.body, marginTop: 8, fontSize: 12, textAlign: "center" }}>{err}</Text>
+          ) : null}
         </View>
       )}
+      {/* Status diagnostik kecil untuk host (membantu laporan jika masih hitam) */}
+      {role === "host" ? (
+        <View style={{ position: "absolute", bottom: 4, left: 8 }} pointerEvents="none">
+          <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 9, fontFamily: fonts.body }}>
+            cam:{previewReady ? "on" : "off"} join:{joined ? "ok" : "..."}{err ? ` err:${err.slice(0, 40)}` : ""}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 });
