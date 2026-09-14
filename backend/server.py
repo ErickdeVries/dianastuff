@@ -509,6 +509,33 @@ async def get_product(product_id: str):
     return product_public(doc)
 
 
+@api_router.get("/products/{product_id}/reviews")
+async def product_reviews(product_id: str):
+    """Aggregate buyer reviews (star + comment) for a product from its orders."""
+    cursor = db.orders.find(
+        {"deleted_at": None, "review": {"$ne": None}, "items.product_id": product_id},
+        {"_id": 0, "review": 1, "alamat": 1},
+    )
+    items = []
+    total = 0
+    async for o in cursor:
+        rv = o.get("review") or {}
+        rating = int(rv.get("rating", 0) or 0)
+        if rating < 1:
+            continue
+        total += rating
+        items.append({
+            "rating": rating,
+            "komentar": rv.get("komentar", ""),
+            "nama": (o.get("alamat") or {}).get("nama") or "Pembeli",
+            "created_at": rv["created_at"].isoformat() if rv.get("created_at") else None,
+        })
+    items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    count = len(items)
+    average = round(total / count, 1) if count else 0
+    return {"average": average, "count": count, "items": items}
+
+
 @api_router.post("/products")
 async def create_product(payload: ProductIn, admin: dict = Depends(require_admin)):
     doc = payload.dict()

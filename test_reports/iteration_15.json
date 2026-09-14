@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 15 — regression + new-feature review for: (a) GET /api/products/{id}/reviews aggregate endpoint, (b) product-detail 'Ulasan Pembeli' section, (c) full-screen ImageViewer open/close, (d) WhatsApp/Share header button, (e) admin 'Lihat sebagai Pembeli' eye button navigation from /dashboard/produk, (f) uploadAsset compression regression via product-form add-photo. Backend: 8/8 pytest passed against public preview URL (test_product_reviews.py) — reviews endpoint returns correct {average, count, items[{rating, komentar, nama, created_at}]} shape, average consistency verified, unknown-product-id returns empty aggregation (200, count 0), unknown product 404 works, no _id leakage, upload endpoint requires auth. NOTE: seeded product 83eb256eba3c4507bff619b294699876 currently has 1 review avg 5.0 (spec expected 4.8/4 — data drift only, endpoint correct). Frontend: (1) /produk/83eb256eba3c4507bff619b294699876 renders 'Ulasan Pembeli' section with rating pill '5 · 1 ulasan' and one review card [Pembeli Demo, 5 stars, comment, 14/09/2026] — matches spec; (2) tapping produk-foto opens Modal, image-viewer-close visible, tapping close dismisses modal (no crash, page still alive); (3) produk-share header icon visible and tapping triggers Share (navigator.share fallback on web) without crashing the page; (4) admin login (admin/admin123 via tab-whitelist) -> /dashboard/produk -> click preview-product-<id> navigates to /produk/<id> (buyer POV) and reviews load; (5) product-form add-photo triggers native file chooser on web, expo-image-manipulator compresses a 2000x2000 63KB test JPEG to a 10KB /api/files/... asset (POST /api/upload -> 200 with { path, url }), preview thumbnail renders. No React Native red screen or console errors observed. No deprecated expo packages spotted in reviewed files. No app-side test data persisted (product-form was NEVER submitted, profil_admin untouched: logo_url=None, banner_url=unsplash — matches iter14 pre-test state; only 3 seeded products remain).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_product_reviews.py",
+    "/app/test_reports/pytest/pytest_product_reviews.xml",
+    "/app/test_reports/screenshots/iter15_product_detail.jpeg",
+    "/app/test_reports/screenshots/iter15_image_viewer.jpeg",
+    "/app/test_reports/screenshots/iter15_admin_buyer_pov.jpeg",
+    "/app/test_reports/screenshots/iter15_upload_after.jpeg"
+  ],
+  "action_items": [
+    "NONE required — all requested features work. Minor: the review spec said 'avg 4.8/4 items' but live data now shows 1 review (avg 5.0). Not a code bug; consider re-seeding more reviews for /api/products/83eb256eba3c4507bff619b294699876 if the demo screenshot needs 4 stars. Endpoint aggregation is correct.",
+    "Pinch/pan/double-tap gestures inside ImageViewer cannot be asserted headlessly with Playwright touch emulation; recommend a manual QA pass on a real device / Expo Go for pinch-zoom UX."
+  ],
+  "critical_code_review_comments": [
+    "server.py:512-536 product_reviews aggregation is clean: excludes _id, filters deleted_at & review!=None & items.product_id, coerces rating to int with >=1 guard, sorts by created_at desc, rounds avg to 1 decimal, returns 0/0/[] for empty. No auth needed (public storefront) — matches product detail public read.",
+    "produk/[id].tsx:63-73 onShare: uses React Native Share.share (works on web via navigator.share), falls back to wa.me link on error — safe and non-blocking. Message includes name + Rupiah price + full absolute /produk/{id} link built from EXPO_PUBLIC_BACKEND_URL.",
+    "image-viewer.tsx uses react-native-gesture-handler + reanimated shared values correctly (pinch clamped 1..5, pan gated on scale>1, double-tap toggles 1<->2.5, reset on close). No memory leaks (values reset in handleClose).",
+    "uploads.ts:16-29 compressAsset wraps ImageManipulator.manipulateAsync in try/catch and falls back to the original asset uri — good defensive posture (keeps upload working if native module is missing on a platform). Resize is conditional (>1280) so small images are not upscaled.",
+    "dashboard/produk.tsx:70-76 preview-product-<id> Pressable is 40x40 which is slightly below the 44x44 mobile touch target guideline; icons cluster (eye/edit/delete) is 40px each. Minor a11y nit only — not blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_product_reviews.py"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8 pytest, shape + persistence + edge cases)",
+    "frontend": "100% (5/5 flows: reviews render, image-viewer open/close, share button, admin->buyer POV, upload compression 200 with /api/files/ url)"
+  },
+  "seed_data_creation": "None. product-form was navigated but 'Tambah Produk' was never clicked so no product created. profil_admin unchanged (logo_url None, banner_url unsplash — same as iter14 pre-test). Admin password admin123 untouched. 1 orphan test upload blob exists in object storage at diana-stuff/uploads/user_de1df8f1d29c/54eb6c8604ca4caa9856f23151010a33.jpg (10KB compressed test image, not referenced by any product) — harmless.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login flow: login screen shows Google tab by default — click [data-testid=\"tab-whitelist\"] first, then fill [data-testid=\"username-input\"] input + [data-testid=\"password-input\"] input, then click [data-testid=\"whitelist-login-button\"] (NOT login-submit). After admin login the app lands at /home, not /dashboard — navigate to /dashboard/produk explicitly. Product 83eb256eba3c4507bff619b294699876 (Blouse Katun Premium) has exactly 1 seeded review (Pembeli Demo, 5 stars, 'Kualitas oke, cepat sampai!'). ImageViewer testIDs: produk-foto (open) + image-viewer-close (dismiss); pinch-zoom cannot be asserted headlessly. Share button testID produk-share triggers Web Share API on web with wa.me fallback. Admin buyer-POV: /dashboard/produk cards have testID preview-product-<id> (eye icon) that router.push('/produk/<id>'). Upload compression: expo-image-manipulator resize 1280 + JPEG 0.7 is applied in uploads.ts before POST /api/upload — verified end-to-end via product-form add-photo (2000x2000 -> 10KB /api/files/ asset). Storefront preview URL is via EXPO_PUBLIC_BACKEND_URL (frontend/.env).",
+  "rca_of_issue": "N/A — no bug found. Only discrepancy: spec mentioned 'avg 4.8/4 items' but live seed has 1 review (avg 5.0); this is seed data drift, endpoint logic is correct and shape-consistent."
+}

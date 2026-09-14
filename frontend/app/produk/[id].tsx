@@ -3,14 +3,15 @@ import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
-import { Dimensions, FlatList, Pressable, ScrollView, Text, View } from "react-native";
+import { Dimensions, FlatList, Linking, Pressable, ScrollView, Share, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { apiRequest } from "@/src/api/client";
+import { ImageViewer } from "@/src/components/image-viewer";
 import { useCart } from "@/src/context/cart";
 import { useToast } from "@/src/context/toast";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
-import { formatRupiah } from "@/src/utils/format";
+import { formatDate, formatRupiah } from "@/src/utils/format";
 import { resolveImageUrl } from "@/src/utils/image";
 
 type Product = {
@@ -25,7 +26,11 @@ type Product = {
   foto_urls: string[];
 };
 
+type ReviewItem = { rating: number; komentar: string; nama: string; created_at: string | null };
+type Reviews = { average: number; count: number; items: ReviewItem[] };
+
 const { width: SCREEN_W } = Dimensions.get("window");
+const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 export default function ProductDetail() {
   const styles = useStyles();
@@ -39,14 +44,33 @@ export default function ProductDetail() {
   const [activePhoto, setActivePhoto] = useState(0);
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
+  const [viewerUri, setViewerUri] = useState<string | undefined>(undefined);
 
   const { data: product, isLoading } = useQuery<Product>({
     queryKey: ["product", id],
     queryFn: () => apiRequest<Product>(`/api/products/${id}`, { auth: false }),
   });
 
+  const { data: reviews } = useQuery<Reviews>({
+    queryKey: ["product", id, "reviews"],
+    queryFn: () => apiRequest<Reviews>(`/api/products/${id}/reviews`, { auth: false }),
+    enabled: !!id,
+  });
+
   const photos = product?.foto_urls?.length ? product.foto_urls : [null];
   const available = product ? product.bisa_po || product.stok > 0 : false;
+
+  const onShare = async () => {
+    if (!product) return;
+    const link = `${BASE}/produk/${product.id}`;
+    const msg = `${product.nama_produk} - ${formatRupiah(product.harga)}\nLihat di sini: ${link}`;
+    try {
+      await Share.share({ message: msg });
+    } catch {
+      // Fallback: open WhatsApp share directly.
+      Linking.openURL(`https://wa.me/?text=${encodeURIComponent(msg)}`);
+    }
+  };
 
   const onAdd = () => {
     if (!product) return;
@@ -78,12 +102,17 @@ export default function ProductDetail() {
         <Pressable testID="produk-back" onPress={() => router.back()} hitSlop={10} style={styles.headerBtn}>
           <MaterialDesignIcons name="arrow-left" size={24} color={colors.onSurface} />
         </Pressable>
-        <Pressable testID="produk-cart" onPress={() => router.push("/keranjang")} hitSlop={10} style={styles.headerBtn}>
-          <MaterialDesignIcons name="cart-outline" size={24} color={colors.onSurface} />
-          {count > 0 ? (
-            <View style={styles.badge}><Text style={styles.badgeText}>{count}</Text></View>
-          ) : null}
-        </Pressable>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <Pressable testID="produk-share" onPress={onShare} hitSlop={10} style={styles.headerBtn}>
+            <MaterialDesignIcons name="share-variant" size={22} color={colors.onSurface} />
+          </Pressable>
+          <Pressable testID="produk-cart" onPress={() => router.push("/keranjang")} hitSlop={10} style={styles.headerBtn}>
+            <MaterialDesignIcons name="cart-outline" size={24} color={colors.onSurface} />
+            {count > 0 ? (
+              <View style={styles.badge}><Text style={styles.badgeText}>{count}</Text></View>
+            ) : null}
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 120 + insets.bottom }} showsVerticalScrollIndicator={false}>
@@ -98,7 +127,9 @@ export default function ProductDetail() {
             renderItem={({ item }) => {
               const uri = resolveImageUrl(item);
               return uri ? (
-                <Image source={{ uri }} style={styles.slide} contentFit="cover" transition={200} />
+                <Pressable testID="produk-foto" onPress={() => setViewerUri(uri)}>
+                  <Image source={{ uri }} style={styles.slide} contentFit="cover" transition={200} />
+                </Pressable>
               ) : (
                 <View style={[styles.slide, styles.slideEmpty]}>
                   <MaterialDesignIcons name="image-off-outline" size={40} color={colors.muted} />
@@ -156,6 +187,35 @@ export default function ProductDetail() {
                   <Text style={styles.desc}>{product.deskripsi}</Text>
                 </>
               ) : null}
+
+              {/* Buyer reviews (star + ulasan) */}
+              <View style={styles.reviewHead}>
+                <Text style={styles.sectionTitle}>Ulasan Pembeli</Text>
+                {reviews && reviews.count > 0 ? (
+                  <View style={styles.ratingPill}>
+                    <MaterialDesignIcons name="star" size={16} color={colors.warning} />
+                    <Text style={styles.ratingText}>{reviews.average} · {reviews.count} ulasan</Text>
+                  </View>
+                ) : null}
+              </View>
+              {reviews && reviews.count > 0 ? (
+                reviews.items.map((r, i) => (
+                  <View key={i} style={styles.reviewCard} testID={`review-${i}`}>
+                    <View style={styles.reviewTop}>
+                      <Text style={styles.reviewName}>{r.nama}</Text>
+                      <View style={{ flexDirection: "row" }}>
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <MaterialDesignIcons key={n} name={n <= r.rating ? "star" : "star-outline"} size={14} color={colors.warning} />
+                        ))}
+                      </View>
+                    </View>
+                    {r.komentar ? <Text style={styles.reviewText}>{r.komentar}</Text> : null}
+                    {r.created_at ? <Text style={styles.reviewDate}>{formatDate(r.created_at)}</Text> : null}
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.desc}>Belum ada ulasan untuk produk ini.</Text>
+              )}
             </>
           ) : !isLoading ? (
             <Text style={styles.desc}>Produk tidak ditemukan.</Text>
@@ -191,6 +251,8 @@ export default function ProductDetail() {
           </Pressable>
         </View>
       ) : null}
+
+      <ImageViewer visible={!!viewerUri} uri={viewerUri} onClose={() => setViewerUri(undefined)} />
     </View>
   );
 }
@@ -260,6 +322,27 @@ const useStyles = makeStyles((colors) => ({
   metaText: { fontFamily: fonts.body, fontSize: 13, color: colors.onSurfaceTertiary },
   sectionTitle: { fontFamily: fonts.heading, fontSize: 16, color: colors.onSurface, marginTop: 12 },
   desc: { fontFamily: fonts.body, fontSize: 14, color: colors.onSurfaceTertiary, lineHeight: 22 },
+  reviewHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
+  ratingPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: colors.surfaceTertiary,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  ratingText: { fontFamily: fonts.bodyMedium, fontSize: 13, color: colors.onSurfaceTertiary },
+  reviewCard: {
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 14,
+    padding: 12,
+    gap: 4,
+  },
+  reviewTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  reviewName: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onSurface },
+  reviewText: { fontFamily: fonts.body, fontSize: 13, color: colors.onSurfaceTertiary, lineHeight: 19 },
+  reviewDate: { fontFamily: fonts.body, fontSize: 11, color: colors.muted },
   footer: {
     flexDirection: "row",
     alignItems: "center",

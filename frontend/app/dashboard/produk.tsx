@@ -68,6 +68,13 @@ export default function ProdukScreen() {
         </View>
         <View style={styles.actions}>
           <Pressable
+            testID={`preview-product-${item.id}`}
+            onPress={() => router.push(`/produk/${item.id}`)}
+            style={styles.iconBtn}
+          >
+            <MaterialDesignIcons name="eye-outline" size={20} color={colors.info} />
+          </Pressable>
+          <Pressable
             testID={`edit-product-${item.id}`}
             onPress={() => router.push({ pathname: "/product-form", params: { id: item.id } })}
             style={styles.iconBtn}

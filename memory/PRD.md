@@ -132,6 +132,14 @@ Inter body. Language: Indonesian.
   di APK). uploads.ts: skip permission request di Android (system photo picker tak butuh izin),
   picker dibungkus try/catch agar error muncul (tidak silent). Tombol simpan profil dikunci saat
   upload berjalan. HARUS diverifikasi user lewat build APK baru (tak bisa dites headless).
+- Foto rapi: kompres+resize (max 1280px, quality 0.7) via expo-image-manipulator di uploadAsset.
+- Share produk via WA/Share sheet: tombol share di header /produk/[id] -> Share.share (fallback
+  wa.me) berisi nama+harga+link `${BASE}/produk/{id}`.
+- Foto produk bisa diklik -> full-screen ImageViewer (src/components/image-viewer.tsx) pinch-zoom
+  + pan + double-tap (gesture-handler + reanimated).
+- Ulasan produk: GET /api/products/{id}/reviews agregasi review dari orders (average, count,
+  items). Ditampilkan di /produk/[id] (bintang + komentar + tanggal). Admin "Lihat sebagai
+  Pembeli" via tombol mata di /dashboard/produk -> /produk/[id] (Shopee POV).
 
 
 ## Next Tasks

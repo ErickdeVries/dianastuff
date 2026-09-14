@@ -4,12 +4,29 @@
 // The multipart body differs by runtime: react-native-web needs a real Blob,
 // native needs the { uri, name, type } shape. Never set Content-Type manually.
 
+import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { Platform } from "react-native";
 
 import { ApiError, getToken } from "@/src/api/client";
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
+
+// Resize (max 1280px) + compress so catalog photos are uniform & fast to load.
+async function compressAsset(asset: ImagePicker.ImagePickerAsset): Promise<{ uri: string }> {
+  try {
+    const needsResize = (asset.width ?? 0) > 1280 || (asset.height ?? 0) > 1280;
+    const result = await ImageManipulator.manipulateAsync(
+      asset.uri,
+      needsResize ? [{ resize: { width: 1280 } }] : [],
+      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG },
+    );
+    return { uri: result.uri };
+  } catch {
+    // If manipulation fails, fall back to the original asset.
+    return { uri: asset.uri };
+  }
+}
 
 export type PermResult = { ok: boolean; canAskAgain: boolean };
 
@@ -43,21 +60,20 @@ export async function pickImages(limit: number): Promise<ImagePicker.ImagePicker
 
 export async function uploadAsset(asset: ImagePicker.ImagePickerAsset): Promise<{ path: string; url: string }> {
   const token = await getToken();
-  // Android often doesn't provide fileName/mimeType, so derive them from the
-  // local uri to guarantee a valid multipart schema (see Expo issue #25577).
-  const uriExt = (asset.uri.split("?")[0].split(".").pop() || "jpg").toLowerCase();
-  const safeExt = uriExt.length <= 5 ? uriExt : "jpg";
-  const name = asset.fileName || `photo_${Date.now()}.${safeExt}`;
-  const type = asset.mimeType || `image/${safeExt === "jpg" ? "jpeg" : safeExt}`;
+  // Compress/resize first for uniform, lightweight catalog images.
+  const compressed = await compressAsset(asset);
+  const uri = compressed.uri;
+  const name = `photo_${Date.now()}.jpg`;
+  const type = "image/jpeg";
 
   const form = new FormData();
   if (Platform.OS === "web") {
     // On web the Blob approach is correct; on Android it can produce zero-byte
     // payloads, so it is web-only.
-    const blob = await (await fetch(asset.uri)).blob();
+    const blob = await (await fetch(uri)).blob();
     form.append("file", blob, name);
   } else {
-    form.append("file", { uri: asset.uri, name, type } as any);
+    form.append("file", { uri, name, type } as any);
   }
 
   // IMPORTANT: never set Content-Type manually — fetch must add the multipart
