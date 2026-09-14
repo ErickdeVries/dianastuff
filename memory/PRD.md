@@ -238,3 +238,9 @@ Inter body. Language: Indonesian.
 - Hanya aktif di build HP asli (Agora); di web/Expo Go video hitam (wajar).
 - FIX margin bawah live: kolom chat & input bar pakai Math.max(insets.bottom,12)+12 (host &
   penonton) + chat overlay host diangkat dgn safe-area agar tidak tertimpa tombol navigasi HP.
+
+
+## Web Bundle Export & Cloudflare Pages Setup
+- Export web statis via `npx expo export -p web` ke `/app/frontend/dist`.
+- File `_redirects` (`/*  /index.html  200`) disertakan otomatis untuk SPA routing Cloudflare Pages.
+- Disajikan via download endpoint: `GET /api/download/web.zip` (`dianastuff-web.zip`).

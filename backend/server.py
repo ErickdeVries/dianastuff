@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Header, Depends, UploadFile, File, Form, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
 from fastapi.concurrency import run_in_threadpool
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -487,6 +487,19 @@ async def serve_file(path: str):
     except Exception:
         raise HTTPException(status_code=404, detail="File tidak ditemukan")
     return Response(content=content, media_type=content_type, headers={"Cache-Control": "public, max-age=86400"})
+
+
+@api_router.api_route("/download/web.zip", methods=["GET", "HEAD"])
+async def download_web_bundle():
+    zip_path = ROOT_DIR / "static_downloads" / "web.zip"
+    if not zip_path.exists():
+        raise HTTPException(status_code=404, detail="Bundle belum tersedia")
+    return FileResponse(
+        path=str(zip_path),
+        filename="dianastuff-web.zip",
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="dianastuff-web.zip"'},
+    )
 
 
 # ---------------------------------------------------------------------------
