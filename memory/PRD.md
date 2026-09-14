@@ -302,3 +302,14 @@ Inter body. Language: Indonesian.
 - web.zip terbaru (backend produksi + splash + SEO/OG + og-image) di /api/download/web.zip.
 - APK button: menunggu user kirim file .apk -> taruh di backend/static_downloads/app.apk &
   isi APK_URL di landing-page.tsx, lalu rebuild.
+
+## Implemented (2026-06 fork — Logo app di landing + maintenance reset admin)
+- Logo navbar landing diganti dari huruf "D" ke icon app asli
+  (`assets/images/logo-icon.png`, crop dari logo yang diupload user). Favicon juga diganti.
+  Jika profil toko punya logo_url, itu tetap diprioritaskan. OG image & splash pakai ikon asli.
+- Endpoint satu-kali `POST /api/maintenance/reset-admin` (header x-maintenance-key =
+  AGORA_APP_CERTIFICATE dari .env) untuk reset password admin di PRODUKSI setelah redeploy.
+  Teruji lokal: tanpa kunci 404, dengan kunci ok, login admin123 jalan.
+  TODO: setelah user redeploy Emergent -> panggil endpoint di diana-store-2.emergent.host,
+  lalu sync ongkir/akun via API admin produksi, lalu HAPUS endpoint ini.
+- CATATAN: DB produksi TERPISAH dari lokal (reset lokal tidak mempengaruhi produksi).

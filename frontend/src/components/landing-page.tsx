@@ -39,6 +39,10 @@ const INSTALL_STEPS = [
   "Selesai — buka aplikasi dianastuff dan mulai belanja!",
 ];
 
+// Logo aplikasi (sama dengan icon app) — dipakai di navbar landing bila
+// profil toko belum punya logo_url.
+const APP_ICON = require("../../assets/images/logo-icon.png");
+
 function waLink(no: string): string {
   let d = (no || "").replace(/\D/g, "");
   if (d.startsWith("620")) d = `62${d.slice(3)}`;
@@ -86,11 +90,7 @@ export function LandingPage() {
         <View style={styles.navbar}>
           <View style={styles.brandRow}>
             <View style={styles.logoBox}>
-              {logo ? (
-                <Image source={{ uri: logo }} style={styles.logoImg} contentFit="cover" />
-              ) : (
-                <Text style={styles.logoText}>D</Text>
-              )}
+              <Image source={logo ? { uri: logo } : APP_ICON} style={styles.logoImg} contentFit="cover" />
             </View>
             <Text style={styles.brandName}>dianastuff</Text>
           </View>
@@ -277,7 +277,7 @@ const useStyles = makeStyles((colors) => ({
   heroOverlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(42,29,56,0.55)" },
   navbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, width: "100%", maxWidth: 1100, alignSelf: "center" },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  logoBox: { width: 40, height: 40, borderRadius: 12, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  logoBox: { width: 44, height: 44, borderRadius: 13, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center", overflow: "hidden" },
   logoImg: { width: "100%", height: "100%" },
   logoText: { fontFamily: fonts.heading, fontSize: 18, color: colors.onBrandPrimary },
   brandName: { fontFamily: fonts.heading, fontSize: 18, color: colors.onSurfaceInverse },
