@@ -290,3 +290,15 @@ Inter body. Language: Indonesian.
   via `EXPO_PUBLIC_BACKEND_URL=... npx expo export -p web --clear`. Tertanam 8x, 0 preview.
 - CATATAN PENTING: backend produksi pakai DB produksi (bisa beda data dengan dev).
   Link download web.zip dilayani backend preview (/api/download/web.zip).
+
+## Implemented (2026-06 fork — SEO & Meta untuk share link)
+- Meta SEO/OG di index.html hasil export: title "dianastuff — Live Shopping & Belanja Online",
+  description, theme-color #A855F7, Open Graph (og:title/description/url/image 1200x630) &
+  Twitter card summary_large_image -> preview muncul saat link dibagikan di WhatsApp/sosmed.
+- og-image.png (1200x630, gradient ungu + logo D + tagline + chip LIVE SHOPPING/dianastuff.com)
+  dibuat via PIL dari font Poppins app, disimpan di frontend/public/ (ikut ter-export ke dist).
+- Splash loading & meta kini diinjeksikan ke dist/index.html pasca-export (template web/index.html
+  disimpan untuk referensi; Metro export SDK ini tidak memakai template tsb).
+- web.zip terbaru (backend produksi + splash + SEO/OG + og-image) di /api/download/web.zip.
+- APK button: menunggu user kirim file .apk -> taruh di backend/static_downloads/app.apk &
+  isi APK_URL di landing-page.tsx, lalu rebuild.
