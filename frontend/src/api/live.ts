@@ -87,6 +87,10 @@ export function getLiveHistory(): Promise<LiveHistoryItem[]> {
   return apiRequest<LiveHistoryItem[]>("/api/admin/live-history");
 }
 
+export function deleteLiveRecap(id: string): Promise<{ ok: boolean }> {
+  return apiRequest(`/api/admin/live-history/${id}`, { method: "DELETE" });
+}
+
 export function stopLive(): Promise<{ live: boolean }> {
   return apiRequest<{ live: boolean }>("/api/live/stop", { method: "POST" });
 }

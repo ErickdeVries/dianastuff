@@ -1,0 +1,44 @@
+{
+  "summary": "Iter25 full verification of 3 live-shopping fixes — ALL PASS. (1) SOCKET AUTH-UPGRADE BUG (core fix) verified end-to-end with two browser contexts on the preview URL: opened /live as GUEST first (socket connected as guest, sent chat 'TEST_guest_before_login_iter25' which rendered on screen), then logged in as admin IN THE SAME SESSION via pure SPA navigation (live-close -> /toko -> toko-account -> /login -> whitelist login -> /home, zero page reloads so the module-level socket singleton survived), navigated drawer -> /dashboard/live -> open-studio -> /live-host. A guest in a SECOND incognito context joined /live and chatted. RESULT: host eye pill showed count=1 and the guest chat 'TEST_guest_after_login_iter25' appeared on the HOST screen (previously both invisible); host reply reached the guest (screenshots iter25_host_studio.png, iter25_guest_live.png). The src/lib/socket.ts token-change reconnect works. Backend counterpart also verified via pytest: admin socket receives live_viewers(count>=1) + live_chat emitted by a guest socket. (2) FILTER POPUP: on /live-host the panel closes BOTH via the 'Tutup' chip (filter-close) and via backdrop tap (filter-backdrop) — PASS/PASS. (3) REKAP DELETE: trash button per card -> ConfirmDialog -> cancel keeps card, confirm removes card from UI AND backend history — PASS (DELETE /api/admin/live-history/{id} verified 401 unauth / 403 buyer / 404 missing / 200 ok in pytest, plus full start->stop->delete lifecycle). Regression PASS: landing / renders, /toko renders, guest /live full-screen layout intact (both live-active overlay and offline 'Belum ada siaran live'), host top controls host-switch-cam/host-filter/host-share/host-stop all visible, stop-live ConfirmDialog works and lands on Rekap Live. Backend: 6/6 pytest passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_rekap_delete_socket_iter25.py",
+    "/app/test_reports/pytest/pytest_iter25.xml",
+    "/app/test_reports/screenshots/iter25_host_studio.png",
+    "/app/test_reports/screenshots/iter25_guest_live.png",
+    "/app/test_reports/screenshots/iter25_rekap_after_delete.png",
+    "/app/test_reports/screenshots/iter25_guest_live_offline.png"
+  ],
+  "action_items": [
+    "None blocking — all 3 fixes verified working on the preview URL.",
+    "OPTIONAL polish: rekap screen testID prefix collision — '[data-testid^=rekap-]' also matches 'rekap-live-setup' link and 'rekap-delete-*' buttons; harmless for users, just note for future test selectors.",
+    "NOTE for future testers: dashboard drawer DOES auto-close after item selection (confirmed via bounding box x=-309); off-canvas drawer items stay in DOM so is_visible() is unreliable — use bounding_box().x >= 0 instead. Hamburger toggle is at approx (28,32) in 375px viewport; aria-label selectors matched but did not reliably toggle.",
+    "NOTE for future testers: Playwright png screenshots in this harness reject the quality option (quality only works for jpeg); omit it."
+  ],
+  "critical_code_review_comments": [
+    "src/lib/socket.ts fix is correct: socketToken tracked at connect; mismatch triggers removeAllListeners+disconnect+reconnect with new token — verified live on preview (guest->admin upgrade in same SPA session delivered live_viewers/live_chat to host).",
+    "backend DELETE /api/admin/live-history/{show_id} only deletes docs with status='ended' (live shows can't be deleted) and requires admin — access control verified 401/403/404/200.",
+    "live-host.tsx filter panel: backdrop Pressable + 'Tutup' chip both wired to setFilterOpen(false) — both close paths verified.",
+    "live-rekap.tsx delete uses ConfirmDialog + react-query invalidation — UI and DB stay in sync (verified backend GET after UI delete).",
+    "No deprecated packages (expo-av etc.) and no red screens observed; camera black-video + informative fallback message on web is expected behavior."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_rekap_delete_socket_iter25.py (new test file, 6 tests)",
+    "/app/test_reports/iteration_25.json"
+  ],
+  "success_rate": {"backend": "100% (6/6 pytest)", "frontend": "100% (socket upgrade 6/6 checks, filter popup 2/2, rekap delete 5/5, regression 4/4)"},
+  "seed_data_creation": "Temporary live 'TEST_iter25_host_visibility' started/stopped during tests; its recap was deleted via the new UI delete flow. Cleanup also removed 36 leftover TEST_* recaps from iterations 22-25 via the new DELETE endpoint (admin-only test data, not production data). Final state: no live running.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All 3 fixes (socket auth-upgrade, filter popup close, rekap delete) verified working on preview. Live is stopped; TEST recaps cleaned. Test creds: admin/admin123, buyer/buyer123 via /api/auth/login-whitelist (NOT /auth/login). For drawer navigation in Playwright: click hamburger at (28,32), click drawer item, drawer auto-closes — never trust is_visible for drawer items (off-canvas DOM persists), use bounding_box. Reusable pytest file: /app/backend/tests/test_rekap_delete_socket_iter25.py.",
+  "rca_of_issue": "Original bug RCA (confirmed fixed): shared socket singleton connected as guest when browsing /live before login and was reused after login, so the host socket never joined the 'admins' room and received no live_viewers/live_chat. Fix (token-change disconnect+reconnect in src/lib/socket.ts) verified: after guest->admin upgrade in the same SPA session, the host studio received viewer count (eye pill=1) and guest chat, and host replies reached guests. No residual issues. Test-infra pitfalls documented for next agent (drawer off-canvas visibility, png screenshot quality param, rekap testID prefix collision)."
+}

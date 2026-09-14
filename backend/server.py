@@ -723,6 +723,14 @@ async def live_history(admin: dict = Depends(require_admin)):
     return out
 
 
+@api_router.delete("/admin/live-history/{show_id}")
+async def delete_live_history(show_id: str, admin: dict = Depends(require_admin)):
+    res = await db.live_shows.delete_one({"id": show_id, "status": "ended"})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Rekap tidak ditemukan")
+    return {"ok": True}
+
+
 @api_router.get("/live/token")
 async def live_token(role: str = "audience", uid: int = 0, authorization: Optional[str] = Header(None)):
     """Issue an Agora RTC token. Audience is public (guests allowed);

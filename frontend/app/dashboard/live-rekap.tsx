@@ -1,9 +1,12 @@
 import MaterialDesignIcons from "@react-native-vector-icons/material-design-icons";
-import { useQuery } from "@tanstack/react-query";
-import { FlatList, Text, View } from "react-native";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { FlatList, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { getLiveHistory, LiveHistoryItem } from "@/src/api/live";
+import { deleteLiveRecap, getLiveHistory, LiveHistoryItem } from "@/src/api/live";
+import { ConfirmDialog } from "@/src/components/confirm-dialog";
+import { useToast } from "@/src/context/toast";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { formatDateTime, formatRupiah } from "@/src/utils/format";
 
@@ -11,16 +14,35 @@ export default function LiveRekapScreen() {
   const styles = useStyles();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [toDelete, setToDelete] = useState<LiveHistoryItem | null>(null);
 
   const { data, isLoading } = useQuery<LiveHistoryItem[]>({
     queryKey: ["live", "history"],
     queryFn: getLiveHistory,
   });
 
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => deleteLiveRecap(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["live", "history"] });
+      toast.show("Rekap live dihapus", "success");
+    },
+    onError: () => toast.show("Gagal menghapus rekap", "error"),
+  });
+
   const renderItem = ({ item }: { item: LiveHistoryItem }) => (
     <View style={styles.card} testID={`rekap-${item.id}`}>
-      <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-      {item.started_at ? <Text style={styles.date}>{formatDateTime(item.started_at)}</Text> : null}
+      <View style={styles.cardHead}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
+          {item.started_at ? <Text style={styles.date}>{formatDateTime(item.started_at)}</Text> : null}
+        </View>
+        <Pressable testID={`rekap-delete-${item.id}`} style={styles.deleteBtn} onPress={() => setToDelete(item)} hitSlop={8}>
+          <MaterialDesignIcons name="trash-can-outline" size={20} color={colors.error} />
+        </Pressable>
+      </View>
       <View style={styles.statRow}>
         <View style={styles.stat}>
           <MaterialDesignIcons name="eye" size={20} color={colors.brandPrimary} />
@@ -60,6 +82,17 @@ export default function LiveRekapScreen() {
           ) : null
         }
       />
+      <ConfirmDialog
+        visible={!!toDelete}
+        title="Hapus Rekap Live?"
+        message={`Rekap "${toDelete?.title ?? ""}" akan dihapus permanen.`}
+        confirmLabel="Hapus"
+        onConfirm={() => {
+          if (toDelete) deleteMut.mutate(toDelete.id);
+          setToDelete(null);
+        }}
+        onCancel={() => setToDelete(null)}
+      />
     </View>
   );
 }
@@ -67,8 +100,10 @@ export default function LiveRekapScreen() {
 const useStyles = makeStyles((colors) => ({
   root: { flex: 1, backgroundColor: colors.surface },
   card: { backgroundColor: colors.surfaceSecondary, borderRadius: 16, padding: 16, gap: 6 },
+  cardHead: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   title: { fontFamily: fonts.heading, fontSize: 16, color: colors.onSurface },
-  date: { fontFamily: fonts.body, fontSize: 12, color: colors.muted },
+  date: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, marginTop: 2 },
+  deleteBtn: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
   statRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 8 },
   stat: { flex: 1, alignItems: "center", gap: 2 },
   statValue: { fontFamily: fonts.heading, fontSize: 20, color: colors.onSurface },

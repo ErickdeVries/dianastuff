@@ -203,18 +203,24 @@ export default function LiveHostScreen() {
 
       {/* Filter + quality + beauty panel */}
       {filterOpen ? (
-        <View style={[styles.filterPanel, { top: insets.top + 64 }]}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 4 }}>
-            {FILTERS.map((f) => {
-              const on = activeFilter === f.id;
-              return (
-                <Pressable key={f.id} testID={`filter-${f.id}`} style={[styles.filterChip, on && styles.filterChipOn]} onPress={() => pickFilter(f.id)}>
-                  <MaterialDesignIcons name={f.icon as any} size={18} color="#fff" />
-                  <Text style={styles.filterText}>{f.label}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+        <>
+          <Pressable testID="filter-backdrop" style={styles.filterBackdrop} onPress={() => setFilterOpen(false)} />
+          <View style={[styles.filterPanel, { top: insets.top + 64 }]}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 4 }}>
+              {FILTERS.map((f) => {
+                const on = activeFilter === f.id;
+                return (
+                  <Pressable key={f.id} testID={`filter-${f.id}`} style={[styles.filterChip, on && styles.filterChipOn]} onPress={() => pickFilter(f.id)}>
+                    <MaterialDesignIcons name={f.icon as any} size={18} color="#fff" />
+                    <Text style={styles.filterText}>{f.label}</Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable testID="filter-close" style={styles.filterChip} onPress={() => setFilterOpen(false)}>
+                <MaterialDesignIcons name="close" size={18} color="#fff" />
+                <Text style={styles.filterText}>Tutup</Text>
+              </Pressable>
+            </ScrollView>
 
           <View style={styles.qualityRow}>
             <MaterialDesignIcons name="quality-high" size={16} color="#fff" />
@@ -243,7 +249,8 @@ export default function LiveHostScreen() {
               <Text style={styles.beautyVal}>{Math.round(beautyLevel * 100)}</Text>
             </View>
           ) : null}
-        </View>
+          </View>
+        </>
       ) : null}
 
       {/* Pinned banner */}
@@ -394,6 +401,7 @@ const useStyles = makeStyles((colors) => ({
   stopBtn: { backgroundColor: colors.error },
 
   filterRow: { position: "absolute", left: 8, right: 8 },
+  filterBackdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.25)" },
   filterPanel: { position: "absolute", left: 8, right: 8, gap: 8, backgroundColor: "rgba(0,0,0,0.35)", borderRadius: 16, paddingVertical: 8 },
   filterChip: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.5)", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1.5, borderColor: "transparent" },
   filterChipOn: { borderColor: "#fff", backgroundColor: "rgba(168,85,247,0.7)" },

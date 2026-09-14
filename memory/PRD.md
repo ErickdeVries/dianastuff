@@ -342,3 +342,10 @@ Inter body. Language: Indonesian.
   ProGuard sengaja TIDAK diaktifkan (berisiko merusak Agora di release build).
 - Terverifikasi iter24: konfigurasi valid & mekanisme resmi (reactNativeArchitectures).
   WAJIB build APK baru untuk melihat efeknya.
+
+## FIX (2026-09-14 — Emoji like blur & tak terlihat di host), iter26
+- FloatingEmoji: render fontSize 44 + animasi scale MENURUN (1->0.65, bukan membesar),
+  includeFontPadding:false, zIndex/elevation 50 -> tajam di Android (GPU upscale = penyebab blur).
+- Host tak melihat emoji: penyebab = bug socket guest-reuse (sudah fix iter25) — terverifikasi
+  ulang iter26: reaction tamu kini MUNCUL juga di layar host (live_react ke room live+admins).
+- Fix host visibility butuh APK BARU (build lama belum memuat perbaikan socket).

@@ -1,0 +1,38 @@
+{
+  "summary": "Iter26 verified the two floating-reaction fixes end-to-end on the preview URL with two browser contexts (host admin + guest). (1) AUDIENCE BLURRY EMOJI FIX: guest tapped live-like/live-react-* rapidly; DOM shows 5 floating emojis rendered at fontSize 44px with opacity animating 1->0 and scale only DOWN (1->0.65 per code) — no GPU upscale of Text, so Android sharpness issue is addressed at the source. Screenshot iter26_guest_floats.jpeg shows large, crisp emojis floating over the video area. (2) HOST INVISIBILITY FIX: the SAME 5 emojis appeared simultaneously on the host /live-host screen (fontSize 44px, screenshot iter26_host_floats.jpeg clearly shows floating emoji mid-screen) — proves live_react is emitted to both 'live' and 'admins' rooms (server.py:1778) and FloatingEmoji renders on host. Backend socket path reviewed: live_react handler broadcasts room=['live','admins'] with no gating, so even a host that never joined 'live' receives it. REGRESSION ALL PASS: viewer pill=1 on host, chat guest->host and host->guest both delivered (visible in screenshots), filter panel opens and closes via BOTH 'Tutup' chip and backdrop tap. CODE REVIEW floating-emoji.tsx: transform scale = 1 - progress*0.35 (never >1, no upscale), translateY -240 with sine sway, includeFontPadding:false, zIndex/elevation 50, pointerEvents='none', cleanup via runOnJS(onDone) on animation finish — correct. No deprecated expo packages, no red screens. NOTE: blur fix can only be fully validated on a real Android device/APK (web preview uses DOM, not GPU texture upscale); code-level root cause (scale-up transform) is confirmed removed. User's installed APK predates the socket fix — host visibility on their device requires a new build. Cleanup: live stopped via POST /api/live/stop (live:false confirmed).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/screenshots/iter26_guest_floats.jpeg",
+    "/app/test_reports/screenshots/iter26_host_floats.jpeg",
+    "/app/test_reports/screenshots/iter26_host_final.jpeg"
+  ],
+  "action_items": [
+    "Ship a NEW APK build to the user — their installed build predates both the socket auth-upgrade fix (iter25) and the floating-emoji rewrite; host-side reaction visibility cannot be fixed on their device without it.",
+    "Blur fix is verified at code level (no scale>1, base fontSize 44) but final sharpness confirmation needs a real Android device — web preview renders DOM text, not GPU-upscaled textures.",
+    "Optional: floating-emoji.tsx has no testID (pointerEvents=none, non-interactive) — acceptable; tests locate floats via computed font-size >= 40px instead."
+  ],
+  "critical_code_review_comments": [
+    "floating-emoji.tsx: scale = 1 - progress*0.35 (0.65..1.0) — no upscale, addresses Android GPU-texture blur RCA correctly; includeFontPadding:false and zIndex/elevation 50 present; onDone via runOnJS in withTiming callback — correct reanimated pattern.",
+    "server.py live_react (L1773-1778): broadcasts to room=['live','admins'] — host receives reactions without joining the 'live' room; emoji whitelist (LIVE_REACTIONS) prevents arbitrary input.",
+    "live.tsx and live-host.tsx both cap floats with slice(-24) and remove on onDone — no unbounded growth.",
+    "Transient infra note: mid-test the expo service auto-restarted causing a one-off Cloudflare 502 on the preview URL; recovered within ~30s, not an app bug."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_26.json"
+  ],
+  "success_rate": {"backend": "100% (live start/stop + live_react->admins room verified live)", "frontend": "100% (guest floats 5/5, host floats 5/5, chat 2/2, viewer pill 1/1, filter close 2/2)"},
+  "seed_data_creation": "Temporary live 'TEST_iter26_reactions' with product 'Blouse Katun Premium' started and stopped during testing; final state: no live running. Test chat messages TEST_iter26_* were in-memory only (socket buffer clears on stop).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Both floating-emoji fixes verified on preview. Login: admin/admin123 via /api/auth/login-whitelist returns key 'session_token' (NOT 'token'). Reaction testIDs contain literal emoji: [data-testid=\"live-react-\\U0001F525\"] style escaping does NOT work in Playwright python strings — use the literal emoji character. Detect floating emojis in DOM via computed font-size >= 40px (they have no testID). If preview returns Cloudflare 502, check 'sudo supervisorctl status expo' — it may be restarting; wait ~30s and retry.",
+  "rca_of_issue": "Blur RCA: previous FloatingEmoji rendered Text at small base size and used transform scale UP (>1); on Android the GPU upscales the rasterized text texture -> blur. Fix renders at fontSize 44 and only scales DOWN (1->0.65) so the texture is never enlarged. Host-invisibility RCA: socket singleton connected as guest was reused after admin login so host never joined the 'admins' room (fixed iter25 in src/lib/socket.ts); backend itself always emitted live_react to 'admins'. Both verified working this iteration with host+guest dual-context test: 5/5 emojis rendered on BOTH screens."
+}

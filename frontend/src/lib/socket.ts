@@ -6,10 +6,22 @@ const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 // One shared socket connection for the whole app.
 let socket: Socket | null = null;
+// Token yang dipakai saat koneksi dibuat — untuk mendeteksi perubahan auth.
+let socketToken: string | null = null;
 
 export async function connectSocket(): Promise<Socket> {
-  if (socket && socket.connected) return socket;
   const token = await getToken();
+  // Jika status login berubah (mis. socket tersambung sebagai tamu lalu user login),
+  // buang koneksi lama agar koneksi baru membawa token & join room yang benar.
+  if (socket && socketToken !== token) {
+    try {
+      socket.removeAllListeners();
+      socket.disconnect();
+    } catch {}
+    socket = null;
+  }
+  if (socket && socket.connected) return socket;
+  socketToken = token;
   if (socket) {
     socket.auth = { token };
     socket.connect();
@@ -34,4 +46,5 @@ export function disconnectSocket() {
     socket.disconnect();
     socket = null;
   }
+  socketToken = null;
 }
