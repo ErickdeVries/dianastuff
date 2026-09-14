@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 17 — Live Shopping (Agora) feature. Backend: 7/8 pytest cases pass. One real security bug: GET /api/live/token?role=host does NOT enforce admin auth — any caller (guest, buyer) can mint an Agora publisher/host token for the channel. Frontend: all requested flows verified end-to-end on mobile viewport. Admin /dashboard/live shows form (live-title container + live-pick-<id> pickers + start-live), starts a show, and switches to LIVE state (LIVE badge, share-live, stop-live). Storefront /toko shows red live-banner when active and navigates to /live on tap; banner is absent when not live. Public /live is accessible WITHOUT login (no redirect to /login), shows LIVE badge, share/cart FABs, title, and product cards with purple 'Beli' buttons (live-buy-<id>). Guest tapping 'Beli' adds to cart and routes to /login. When no live is active, /live shows 'Belum ada siaran live' + 'Ke Etalase'. Product detail /produk/[id] renders review cards with foto_url photos when present (Ulasan Pembeli section — regression OK). Cleanup: live show was stopped after tests; both backend + frontend cleanup executed successfully.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/live/token?role=host",
+        "issue": "Missing admin auth enforcement — endpoint returns 200 with a valid Agora host (publisher) token for guests and buyers. Spec requires 401 without admin auth. Any user with the public URL can broadcast into the live channel, hijacking the store's audio/video. Server.py lines 578-591: the route only accepts role/uid query params and has no Depends(require_admin) when role=='host'. Fix: if role == 'host': require admin dependency (or 403).",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_live_shopping.py",
+    "/app/test_reports/pytest/pytest_iter17_live_shopping.xml"
+  ],
+  "action_items": [
+    "Enforce admin auth on GET /api/live/token when role='host' (return 401/403 for non-admin callers). Backend/server.py line 578-591. Frontend already sends admin bearer token for host role (src/api/live.ts:36 auth: role === 'host'), so this is a server-side hardening only.",
+    "Optional: consider using a per-broadcaster host UID and/or a signed nonce rather than global role query — reduces blast radius if admin token leaks."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py:518 imports agora_token_builder at module scope after other route defs; move to top of file with other imports for consistency (minor).",
+    "backend/server.py:578-591 /live/token accepts any uid/role from query; adding admin gate for host is required (see critical issue).",
+    "frontend/app/live.tsx cart FAB has good visual affordance but touch target is 40x40 (below iOS/Android 44pt guideline) — consider bumping to 44x44."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_live_shopping.py (new)"
+  ],
+  "success_rate": {
+    "backend": "87.5% (7/8 pytest tests passing; 1 real bug — host-token missing admin auth)",
+    "frontend": "100% (admin start/stop cycle, banner presence, guest access, Beli→login, product-detail reviews with foto_url all verified)"
+  },
+  "seed_data_creation": "No persistent seed data. Test live shows created during test runs (TEST_LIVE_iter17 / _v2) were all set to status='ended' by the stop endpoint at the end of tests; final verification confirmed /api/live/current returns {live:false} and public /live shows 'Belum ada siaran live'.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Login endpoint is POST /api/auth/login-whitelist and returns {session_token, user} (not 'token'). Login page requires clicking 'Login Whitelist' tab before username/password inputs are rendered — Login Gmail is the default tab. Frontend uses testIDs: live-title, live-pick-<id>, start-live, share-live, stop-live, live-banner (on /toko), live-share, live-cart, live-close, live-buy-<id>, live-product-<id>. Public /live is truly public (no auth guard). Agora appId is present in backend env. Web viewer video appears black by design (no native camera on web). Live show is a single-active document in db.live_shows keyed by status='live'. Ensure to call POST /api/live/stop with admin token after any manual testing to prevent leaving the store in a permanent LIVE state.",
+  "rca_of_issue": "GET /api/live/token endpoint (backend/server.py:578) accepts a `role` query param but does not conditionally require admin authentication when role='host'. Repro: `curl -s '<BASE>/api/live/token?role=host&uid=1'` returns 200 with a valid publisher token. The frontend api client (src/api/live.ts:36) already sends the admin bearer via `auth: role === 'host'`, but that only affects the browser client behavior — the server has no gate. Mitigation: gate the endpoint using something like `if role == 'host': _ = await require_admin(request)` or split into two routes (`/live/token/audience` public, `/live/token/host` admin-only via Depends)."
+}

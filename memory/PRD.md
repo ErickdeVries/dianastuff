@@ -137,12 +137,52 @@ Inter body. Language: Indonesian.
   wa.me) berisi nama+harga+link `${BASE}/produk/{id}`.
 - Foto produk bisa diklik -> full-screen ImageViewer (src/components/image-viewer.tsx) pinch-zoom
   + pan + double-tap (gesture-handler + reanimated).
-- Ulasan produk: GET /api/products/{id}/reviews agregasi review dari orders (average, count,
-  items). Ditampilkan di /produk/[id] (bintang + komentar + tanggal). Admin "Lihat sebagai
-  Pembeli" via tombol mata di /dashboard/produk -> /produk/[id] (Shopee POV).
+- Beri Ulasan lebih mudah: review kini bisa lampirkan foto (foto_url) selain bintang+komentar
+  (POST /orders/{id}/review + product_reviews mengembalikan foto_url). Pengingat: kartu
+  "Pesananmu sudah selesai 🎉" di /order/[id] saat status selesai & belum ulasan, toast otomatis
+  saat status jadi selesai, dan badge "Beri ulasan ⭐" di list Pesanan Saya.
+- LIVE SHOPPING (Agora): backend /api/live/{current,start,stop,token} (token via
+  agora_token_builder; AGORA_APP_ID/AGORA_APP_CERTIFICATE di backend/.env; channel
+  dianastuff_live; audience token publik, host token admin). Admin /dashboard/live: start/stop +
+  pilih produk + broadcaster (native) + share WA. Publik /app/live.tsx: guest boleh nonton, wajib
+  login saat checkout; video + produk + keranjang ungu + share. Banner "Sedang LIVE" di /toko.
+  Video platform-split: live-video.web.tsx (agora-rtc-sdk-ng), live-video.native.tsx
+  (react-native-agora via runtime require -> aman di Expo Go, fallback pesan). Kamera host HANYA
+  jalan di build HP asli. react-native-agora TIDAK didaftarkan sbg config plugin (autolinking);
+  permissions kamera/mic sudah di app.json.
 
 
 ## Next Tasks
 1. Admin approval dashboard.
 2. Store profile editor (logo/banner upload via Object Storage).
 3. Product catalog screens.
+
+## Implemented (2026-06 fork — Live Shopping interaktif)
+- Admin (`/dashboard/live`): tambah field **Caption/Deskripsi**, toggle **Tampilkan Keranjang
+  Produk** (show_cart) & toggle **Wajib Login untuk Menonton** (require_login). Tampilan saat live
+  menampilkan judul, caption, dan meta (keranjang tampil / tanpa keranjang, wajib login / tamu boleh).
+- Backend `POST /api/live/start` menerima `caption`, `show_cart`, `require_login`; `live_public`
+  (dipakai `/live/current` & start) kini mengembalikan `caption`, `show_cart`, `require_login`,
+  dan `whatsapp` (dari `profil_admin`).
+- Viewer (`/app/live.tsx`) dirombak jadi layar live penuh:
+  - Judul + caption overlay, badge LIVE, tombol WhatsApp (buka wa.me nomor toko, normalisasi 62),
+    Share, Close.
+  - **Live chat realtime untuk semua penonton (termasuk tamu tanpa login)** + input komentar.
+  - **Reaction rail**: 6 emoji (❤️🔥😍👍👏😮) + tombol Like ungu → hati/emoji beterbangan
+    (`src/components/floating-emoji.tsx`, reanimated).
+  - Produk (hanya jika `show_cart`): strip horizontal, tap → `/produk/[id]`; FAB ungu → `/toko`.
+  - Gate `require_login`: jika wajib login & belum login → layar "Login untuk menonton".
+- Socket.IO backend: `connect` kini mengizinkan **guest** (role "guest", tanpa join room user);
+  event baru `join_live`/`leave_live` (room "live", kirim histori 50 pesan terakhir ke sid),
+  `live_chat` (broadcast + buffer in-memory 100, direset saat start/stop), `live_react` (broadcast
+  emoji tervalidasi). `join`/`message` diberi guard tolak guest. Frontend `src/lib/socket.ts` tetap
+  connect tanpa token untuk tamu.
+- Diverifikasi: backend curl (start/current/stop dengan field baru OK), viewer web preview (guest
+  chat muncul, like beterbangan, produk strip + FAB, WA/share/close, reaction rail).
+- Jumlah penonton realtime: backend track presence (`LIVE_VIEWERS` sid->{name,role,user_id});
+  `join_live`/`leave_live`/`disconnect` update & emit `live_viewers` {count, viewers[]} ke room
+  ["live","admins"] (dedup user login by user_id, tamu -> "Tamu"). Reset saat live stop.
+  Admin `/dashboard/live`: ikon mata + angka di pojok kanan atas video, tap -> modal
+  "Penonton (n)" berisi daftar nama (👑 admin / Tamu). Viewer `/live`: pill mata + angka di
+  samping badge LIVE. Diverifikasi via socket.io client probe (guest join -> admin count=1 +
+  nama; disconnect -> count=0) & screenshot admin modal.

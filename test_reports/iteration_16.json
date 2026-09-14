@@ -1,0 +1,53 @@
+{
+  "summary": "Iteration 16 — 'Beri Ulasan Lebih Mudah' review-with-photo + reminders/nudges. BACKEND: 7/7 pytest passed against public preview (/app/backend/tests/test_review_with_photo.py). POST /api/orders/{id}/review correctly accepts and persists {rating, komentar, foto_url} — validated end-to-end (POST → GET). Regressions verified: review WITHOUT foto_url (null) still works, invalid rating 0/6/-1 → 400, unknown order → 404, non-owner (admin) → 403. GET /api/products/{id}/reviews items now include foto_url (both non-null and null cases). FRONTEND: pesanan-saya nudge-review-<id> visible on the selesai order without review ✓; /order/<id> shows review-reminder card ('Pesananmu sudah selesai 🎉') AND give-review button when status=selesai && !review ✓; tapping either opens the modal with star-1..star-5, review-komentar TextInput, add-review-foto, submit-review ✓; add-review-foto opens file chooser and uploads via pickAndUploadImages returning /api/files/... URL — preview appears with remove-review-foto ✓; remove-review-foto clears the preview and clicking add-review-foto again re-uploads ✓; POST body from UI = {\"rating\":5,\"komentar\":\"...\",\"foto_url\":\"/api/files/...\"} ✓; after submit, order-review card ('Ulasan Kamu') renders 5 filled stars + comment + photo thumbnail, reminder card and give-review button disappear ✓. NotificationListener toast code present (src/components/notification-listener.tsx:80-81 emits 'Pesanan <no> selesai. Yuk beri ulasan ⭐' on socket order_status status==='selesai' for buyers). ONE FRONTEND BUG FOUND: /produk/[id].tsx review cards (lines 201-215) DO NOT render r.foto_url, so buyer-submitted review photos are NOT shown on the product detail page even though the backend correctly returns foto_url in the aggregate items (verified via curl and confirmed 0 /api/files/ images inside the 'Ulasan Pembeli' section on live). Spec explicitly asks for photo (optional) in product-detail review cards.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "app/produk/[id].tsx review card (Ulasan Pembeli section)",
+        "issue": "Review card does not render r.foto_url. Backend GET /api/products/{id}/reviews returns foto_url in items but the JSX (lines 201-215) only renders name, stars, komentar, created_at. Verified live: /api/products/83eb256eba3c4507bff619b294699876/reviews returns foto_url='/api/files/diana-stuff/uploads/.../bfc7957de8484822bd4330c5525a609e.jpg' but the product-detail 'Ulasan Pembeli' card shows 0 /api/files/ images. Reference: /app/frontend/app/produk/[id].tsx:201-215",
+        "testID": "review-<i>",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_review_with_photo.py",
+    "/app/test_reports/pytest/pytest_iter16_review_photo.xml",
+    "/app/test_reports/screenshots/iter16_review_modal.jpeg",
+    "/app/test_reports/screenshots/iter16_review_submitted.jpeg",
+    "/app/test_reports/screenshots/iter16_review_photo_preview.jpeg",
+    "/app/test_reports/screenshots/iter16_review_with_photo_submitted.jpeg",
+    "/app/test_reports/screenshots/iter16_produk_reviews.jpeg"
+  ],
+  "action_items": [
+    "In /app/frontend/app/produk/[id].tsx (~line 213, inside the review-<i> card, after {r.komentar}), render the review photo when r.foto_url is truthy, e.g. `{r.foto_url ? <Image source={{ uri: resolveImageUrl(r.foto_url) }} style={styles.reviewPhoto} contentFit=\"cover\" /> : null}` and add a `reviewPhoto` style similar to the one used in /app/frontend/app/order/[id].tsx (`{ width: 96, height: 96, borderRadius: 12 }`). Also extend the local Reviews type so items include `foto_url?: string | null`."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1045-1065 review_order — clean: rating validation via int() + range 1..5, 404 on missing order, 403 on non-owner, sets full review object atomically. foto_url stored as-is (nullable) — good.",
+    "server.py:512-537 product_reviews — items now include foto_url = rv.get('foto_url'); shape and empty/edge behaviour preserved from iter15.",
+    "app/order/[id].tsx:87-97 submitReview mutation — resets state on success (setReviewFoto/setKomentar/setRating), invalidates the ['order', id] query so the 'Ulasan Kamu' card immediately reflects the new review; reminder disappears via `canReview = status==='selesai' && !order.review` guard — correct.",
+    "app/order/[id].tsx:99-108 onPickReviewFoto — uses same pickAndUploadImages() as bukti/chat; toasts errors; sets reviewFoto only on success. Good; but permissionDenied is not explicitly handled here (unlike onUpload) so galleri-blocked users get a generic error — minor UX nit.",
+    "app/pesanan-saya.tsx:55-58 nudge — testID=`nudge-review-${id}` gated on status==='selesai' && !review. Small tap target (icon+text row) but non-interactive nudge (visual only). Users still need to open the order to actually leave a review — acceptable and matches spec.",
+    "src/components/notification-listener.tsx:80-81 — buyer receives socket 'order_status' with status 'selesai' → toast 'Pesanan <no> selesai. Yuk beri ulasan ⭐'. Correct.",
+    "app/produk/[id].tsx:201-215 — Review card ignores r.foto_url returned by backend. This is the only spec deviation."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_review_with_photo.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 pytest — submit with photo, submit without photo, rating 400s, unknown 404, non-owner 403, product-reviews foto_url present, product-reviews foto_url null)",
+    "frontend": "83% (5/6 flows OK — order reminder, list nudge, modal opens, photo pick+preview+remove, submit persists+shows in 'Ulasan Kamu'; MISS: /produk/[id].tsx review card doesn't render foto_url)"
+  },
+  "seed_data_creation": "Order 841439d641a4418c978769116b2d72c2 (buyer demo, DS-260913-F5C4) review reset to null and status left 'selesai' (matches pre-test state; reusable). Admin password admin123 untouched. One orphan upload blob remains at /api/files/diana-stuff/uploads/user_d652d264c3e5/bfc7957de8484822bd4330c5525a609e.jpg from the photo submit test — harmless (not referenced by any order after reset).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Buyer test order id=841439d641a4418c978769116b2d72c2 (no_order DS-260913-F5C4) is once again status=selesai review=null and ready for reuse. Login: click [data-testid=tab-whitelist] first, then fill [data-testid=username-input] input and [data-testid=password-input] input, click [data-testid=whitelist-login-button]. After login buyer lands on /toko. Review modal testIDs: star-1..star-5, review-komentar, add-review-foto, remove-review-foto, submit-review. Reminder card testID review-reminder on /order/[id]; list nudge testID nudge-review-<id> on /pesanan-saya. Product reviews aggregate: GET /api/products/{id}/reviews returns {average, count, items:[{rating, komentar, foto_url, nama, created_at}]}. To handle native file chooser in Playwright web: `async with page.expect_file_chooser() as fc: await page.click('[data-testid=add-review-foto]', force=True); (await fc.value).set_files('/tmp/review_test.png')`. pytest.ini forces `-n 2 --dist loadscope` — pass `-n 0` to run sequentially (needed for the `_reset_review` autouse fixture that mutates one shared order).",
+  "rca_of_issue": "Bug: product-detail 'Ulasan Pembeli' section drops review photos. Reproduction — (1) buyer submits a review with foto_url via POST /api/orders/{id}/review; (2) GET /api/products/{product_id}/reviews returns items[i].foto_url correctly; (3) open /produk/{product_id} → each review card renders nama, stars, komentar, created_at but no Image for foto_url. Root cause: /app/frontend/app/produk/[id].tsx:201-215 never references r.foto_url. Fix: add an <Image source={{ uri: resolveImageUrl(r.foto_url) }} /> block inside the review-<i> View when r.foto_url is truthy (mirror the pattern in /app/frontend/app/order/[id].tsx:279-282 for the 'Ulasan Kamu' card). Also update the local Reviews TypeScript type to include foto_url?: string | null."
+}

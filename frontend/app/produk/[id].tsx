@@ -26,7 +26,7 @@ type Product = {
   foto_urls: string[];
 };
 
-type ReviewItem = { rating: number; komentar: string; nama: string; created_at: string | null };
+type ReviewItem = { rating: number; komentar: string; foto_url?: string | null; nama: string; created_at: string | null };
 type Reviews = { average: number; count: number; items: ReviewItem[] };
 
 const { width: SCREEN_W } = Dimensions.get("window");
@@ -210,6 +210,11 @@ export default function ProductDetail() {
                       </View>
                     </View>
                     {r.komentar ? <Text style={styles.reviewText}>{r.komentar}</Text> : null}
+                    {r.foto_url ? (
+                      <Pressable onPress={() => setViewerUri(resolveImageUrl(r.foto_url))}>
+                        <Image source={{ uri: resolveImageUrl(r.foto_url) }} style={styles.reviewPhoto} contentFit="cover" />
+                      </Pressable>
+                    ) : null}
                     {r.created_at ? <Text style={styles.reviewDate}>{formatDate(r.created_at)}</Text> : null}
                   </View>
                 ))
@@ -342,6 +347,7 @@ const useStyles = makeStyles((colors) => ({
   reviewTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   reviewName: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onSurface },
   reviewText: { fontFamily: fonts.body, fontSize: 13, color: colors.onSurfaceTertiary, lineHeight: 19 },
+  reviewPhoto: { width: 80, height: 80, borderRadius: 10, backgroundColor: colors.surfaceTertiary, marginTop: 6 },
   reviewDate: { fontFamily: fonts.body, fontSize: 11, color: colors.muted },
   footer: {
     flexDirection: "row",

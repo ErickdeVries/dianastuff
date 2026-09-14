@@ -17,7 +17,7 @@ import { resolveImageUrl } from "@/src/utils/image";
 import { STATUS_LABEL } from "@/src/utils/order";
 
 type OrderItem = { nama_produk: string; harga: number; qty: number; foto?: string | null };
-type Review = { rating: number; komentar: string } | null;
+type Review = { rating: number; komentar: string; foto_url?: string | null } | null;
 type Order = {
   id: string;
   no_order: string;
@@ -61,6 +61,8 @@ export default function OrderDetail() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [rating, setRating] = useState(5);
   const [komentar, setKomentar] = useState("");
+  const [reviewFoto, setReviewFoto] = useState<string | null>(null);
+  const [uploadingReview, setUploadingReview] = useState(false);
 
   const { data: order } = useQuery<Order>({ queryKey: ["order", id], queryFn: () => apiRequest<Order>(`/api/orders/${id}`) });
   const { data: profil } = useQuery<Profil>({ queryKey: ["profil_admin"], queryFn: () => apiRequest<Profil>("/api/profil_admin", { auth: false }) });
@@ -83,13 +85,27 @@ export default function OrderDetail() {
   });
 
   const submitReview = useMutation({
-    mutationFn: () => apiRequest(`/api/orders/${id}/review`, { method: "POST", body: { rating, komentar } }),
+    mutationFn: () => apiRequest(`/api/orders/${id}/review`, { method: "POST", body: { rating, komentar, foto_url: reviewFoto } }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["order", id] });
       setReviewOpen(false);
+      setReviewFoto(null);
+      setKomentar("");
+      setRating(5);
       toast.show("Terima kasih atas ulasannya!", "success");
     },
   });
+
+  const onPickReviewFoto = async () => {
+    setUploadingReview(true);
+    try {
+      const res = await pickAndUploadImages(1);
+      if (res.error) { toast.show(res.error, "error"); return; }
+      if (res.urls[0]) setReviewFoto(res.urls[0]);
+    } finally {
+      setUploadingReview(false);
+    }
+  };
 
   const confirmReceipt = useMutation({
     mutationFn: () => apiRequest(`/api/orders/${id}/terima`, { method: "POST" }),
@@ -260,7 +276,19 @@ export default function OrderDetail() {
               ))}
             </View>
             {order.review.komentar ? <Text style={styles.addrText}>{order.review.komentar}</Text> : null}
+            {order.review.foto_url ? (
+              <Image source={{ uri: resolveImageUrl(order.review.foto_url) }} style={styles.reviewPhoto} contentFit="cover" />
+            ) : null}
           </View>
+        ) : canReview ? (
+          <Pressable style={styles.reminderCard} testID="review-reminder" onPress={() => setReviewOpen(true)}>
+            <MaterialDesignIcons name="star-circle" size={28} color={colors.warning} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.reminderTitle}>Pesananmu sudah selesai 🎉</Text>
+              <Text style={styles.reminderSub}>Yuk beri bintang & foto ulasan untuk bantu pembeli lain!</Text>
+            </View>
+            <MaterialDesignIcons name="chevron-right" size={22} color={colors.muted} />
+          </Pressable>
         ) : null}
       </ScrollView>
 
@@ -312,6 +340,22 @@ export default function OrderDetail() {
               onChangeText={setKomentar}
               multiline
             />
+            {reviewFoto ? (
+              <View style={styles.reviewFotoWrap}>
+                <Image source={{ uri: resolveImageUrl(reviewFoto) }} style={styles.reviewPhoto} contentFit="cover" />
+                <Pressable testID="remove-review-foto" onPress={() => setReviewFoto(null)} style={styles.removeFotoBtn}>
+                  <MaterialDesignIcons name="close" size={16} color="#FFFFFF" />
+                </Pressable>
+              </View>
+            ) : (
+              <M3Button
+                testID="add-review-foto"
+                label={uploadingReview ? "Mengunggah..." : "Tambah Foto"}
+                icon={uploadingReview ? undefined : "camera-plus-outline"}
+                variant="tonal"
+                onPress={onPickReviewFoto}
+              />
+            )}
             <M3Button testID="submit-review" label="Kirim Ulasan" variant="filled" loading={submitReview.isPending} onPress={() => submitReview.mutate()} />
           </Pressable>
         </Pressable>
@@ -356,6 +400,19 @@ const useStyles = makeStyles((colors) => ({
   historyStatus: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onSurface },
   historyTime: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, marginTop: 1 },
   card: { backgroundColor: colors.surfaceSecondary, borderRadius: 18, padding: 16, gap: 10 },
+  reviewPhoto: { width: 96, height: 96, borderRadius: 12, backgroundColor: colors.surfaceTertiary },
+  reviewFotoWrap: { alignSelf: "flex-start" },
+  removeFotoBtn: {
+    position: "absolute", top: -6, right: -6, width: 24, height: 24, borderRadius: 12,
+    backgroundColor: colors.error, alignItems: "center", justifyContent: "center",
+  },
+  reminderCard: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    backgroundColor: colors.surfaceSecondary, borderRadius: 18, padding: 16,
+    borderWidth: 1.5, borderColor: colors.warning,
+  },
+  reminderTitle: { fontFamily: fonts.bodyMedium, fontSize: 15, color: colors.onSurface },
+  reminderSub: { fontFamily: fonts.body, fontSize: 13, color: colors.muted, marginTop: 2, lineHeight: 18 },
   cardTitle: { fontFamily: fonts.heading, fontSize: 16, color: colors.onSurface },
   itemRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   thumb: { width: 48, height: 48, borderRadius: 10, backgroundColor: colors.surfaceTertiary },

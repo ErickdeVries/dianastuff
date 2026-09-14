@@ -38,7 +38,7 @@ function RootNav() {
     const root = segments[0];
     const inAuthGroup = root === "login" || root === "register";
     // Guests may browse the storefront + webview; everything else needs auth.
-    const publicGroup = root === "toko" || root === "produk" || root === "webview";
+    const publicGroup = root === "toko" || root === "produk" || root === "webview" || root === "live";
     if (!user && !inAuthGroup && !publicGroup) {
       router.replace("/login");
     } else if (user && (inAuthGroup || !root)) {

@@ -11,7 +11,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.dianastuff.app",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Pilih foto produk dan banner toko"
+        "NSPhotoLibraryUsageDescription": "Pilih foto produk dan banner toko",
+        "NSCameraUsageDescription": "Siaran live jualan pakai kamera",
+        "NSMicrophoneUsageDescription": "Suara host saat siaran live"
       }
     },
     "android": {
@@ -20,7 +22,7 @@
         "backgroundColor": "#000000"
       },
       "package": "com.dianastuff.app",
-      "permissions": ["READ_MEDIA_IMAGES"]
+      "permissions": ["READ_MEDIA_IMAGES", "CAMERA", "RECORD_AUDIO", "MODIFY_AUDIO_SETTINGS"]
     },
     "web": {
       "bundler": "metro",

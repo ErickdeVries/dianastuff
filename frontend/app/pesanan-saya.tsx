@@ -17,6 +17,7 @@ type Order = {
   status: string;
   created_at: string | null;
   items: { qty: number }[];
+  review?: { rating: number } | null;
 };
 
 export default function PesananSaya() {
@@ -51,6 +52,12 @@ export default function PesananSaya() {
               {STATUS_LABEL[item.status] ?? item.status}
             </Text>
           </View>
+          {item.status === "selesai" && !item.review ? (
+            <View style={styles.reviewNudge} testID={`nudge-review-${item.id}`}>
+              <MaterialDesignIcons name="star-outline" size={13} color={colors.warning} />
+              <Text style={styles.reviewNudgeText}>Beri ulasan ⭐</Text>
+            </View>
+          ) : null}
         </View>
         <MaterialDesignIcons name="chevron-right" size={22} color={colors.muted} />
       </Pressable>
@@ -100,6 +107,8 @@ const useStyles = makeStyles((colors) => ({
   statusPaid: { backgroundColor: colors.success },
   statusUnpaid: { backgroundColor: colors.warning },
   statusText: { fontFamily: fonts.bodyMedium, fontSize: 11 },
+  reviewNudge: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 5 },
+  reviewNudgeText: { fontFamily: fonts.bodyMedium, fontSize: 12, color: colors.warning },
   empty: { alignItems: "center", gap: 8, paddingVertical: 80 },
   emptyText: { fontFamily: fonts.body, fontSize: 15, color: colors.muted },
 }));

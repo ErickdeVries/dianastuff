@@ -7,6 +7,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import re
+import time
 import uuid
 import secrets
 import bcrypt
@@ -52,6 +53,8 @@ DEFAULT_WHATSAPP = "6285312812452"
 STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
 STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
 EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+AGORA_APP_ID = os.environ.get("AGORA_APP_ID", "")
+AGORA_APP_CERTIFICATE = os.environ.get("AGORA_APP_CERTIFICATE", "")
 APP_NAME = "diana-stuff"
 _storage_key: Optional[str] = None
 
@@ -509,6 +512,107 @@ async def get_product(product_id: str):
     return product_public(doc)
 
 
+# ---------------------------------------------------------------------------
+# Live shopping (Agora) — single active show for this single-tenant store.
+# ---------------------------------------------------------------------------
+from agora_token_builder import RtcTokenBuilder  # noqa: E402
+
+LIVE_CHANNEL = "dianastuff_live"
+# Ephemeral in-memory buffer of recent live chat messages (reset each show).
+LIVE_CHAT_BUFFER: List[dict] = []
+
+
+class LiveStart(BaseModel):
+    title: str = "Live Shopping"
+    caption: str = ""
+    product_ids: List[str] = []
+    show_cart: bool = True
+    require_login: bool = False
+
+
+async def live_public(show: dict) -> dict:
+    prods = []
+    if show.get("product_ids"):
+        docs = await db.products.find(
+            {"id": {"$in": show["product_ids"]}, "deleted_at": None}, {"_id": 0}
+        ).to_list(50)
+        by_id = {p["id"]: product_public(p) for p in docs}
+        prods = [by_id[pid] for pid in show["product_ids"] if pid in by_id]
+    profil = await db.profil_admin.find_one({}, {"_id": 0}) or {}
+    return {
+        "channel": show.get("channel", LIVE_CHANNEL),
+        "title": show.get("title", "Live Shopping"),
+        "caption": show.get("caption", ""),
+        "show_cart": show.get("show_cart", True),
+        "require_login": show.get("require_login", False),
+        "whatsapp": profil.get("whatsapp", ""),
+        "status": show.get("status", "ended"),
+        "products": prods,
+        "started_at": show["started_at"].isoformat() if show.get("started_at") else None,
+    }
+
+
+@api_router.get("/live/current")
+async def live_current():
+    show = await db.live_shows.find_one({"status": "live"}, {"_id": 0})
+    if not show:
+        return {"live": False}
+    return {"live": True, **(await live_public(show))}
+
+
+@api_router.post("/live/start")
+async def live_start(payload: LiveStart, admin: dict = Depends(require_admin)):
+    await db.live_shows.update_many({"status": "live"}, {"$set": {"status": "ended", "ended_at": datetime.now(timezone.utc)}})
+    show = {
+        "id": f"live_{uuid.uuid4().hex[:12]}",
+        "channel": LIVE_CHANNEL,
+        "title": payload.title.strip() or "Live Shopping",
+        "caption": (payload.caption or "").strip(),
+        "product_ids": payload.product_ids,
+        "show_cart": bool(payload.show_cart),
+        "require_login": bool(payload.require_login),
+        "status": "live",
+        "host_uid": 1,
+        "started_at": datetime.now(timezone.utc),
+    }
+    await db.live_shows.insert_one(show)
+    LIVE_CHAT_BUFFER.clear()
+    doc = await db.live_shows.find_one({"id": show["id"]}, {"_id": 0})
+    await sio.emit("live_status", {"live": True, "channel": LIVE_CHANNEL})
+    return {"live": True, **(await live_public(doc))}
+
+
+@api_router.post("/live/stop")
+async def live_stop(admin: dict = Depends(require_admin)):
+    await db.live_shows.update_many({"status": "live"}, {"$set": {"status": "ended", "ended_at": datetime.now(timezone.utc)}})
+    LIVE_CHAT_BUFFER.clear()
+    LIVE_VIEWERS.clear()
+    await sio.emit("live_status", {"live": False})
+    await sio.emit("live_viewers", {"count": 0, "viewers": []}, room=["live", "admins"])
+    return {"live": False}
+
+
+@api_router.get("/live/token")
+async def live_token(role: str = "audience", uid: int = 0, authorization: Optional[str] = Header(None)):
+    """Issue an Agora RTC token. Audience is public (guests allowed);
+    host (publisher) token requires the caller to be the admin."""
+    if not AGORA_APP_ID or not AGORA_APP_CERTIFICATE:
+        raise HTTPException(status_code=503, detail="Live belum dikonfigurasi")
+    if role == "host":
+        # Only the store admin may publish to the channel.
+        user = await get_current_user(authorization)
+        if user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Hanya admin yang bisa siaran")
+    agora_role = 1 if role == "host" else 2  # 1=publisher, 2=subscriber
+    expire = 3600
+    current_ts = int(time.time())
+    privilege_expire = current_ts + expire
+    token = RtcTokenBuilder.buildTokenWithUid(
+        AGORA_APP_ID, AGORA_APP_CERTIFICATE, LIVE_CHANNEL, uid, agora_role, privilege_expire
+    )
+    return {"appId": AGORA_APP_ID, "channel": LIVE_CHANNEL, "uid": uid, "token": token, "role": role, "expiresIn": expire}
+
+
 @api_router.get("/products/{product_id}/reviews")
 async def product_reviews(product_id: str):
     """Aggregate buyer reviews (star + comment) for a product from its orders."""
@@ -527,6 +631,7 @@ async def product_reviews(product_id: str):
         items.append({
             "rating": rating,
             "komentar": rv.get("komentar", ""),
+            "foto_url": rv.get("foto_url"),
             "nama": (o.get("alamat") or {}).get("nama") or "Pembeli",
             "created_at": rv["created_at"].isoformat() if rv.get("created_at") else None,
         })
@@ -1053,7 +1158,12 @@ async def review_order(order_id: str, body: dict, user: dict = Depends(get_curre
         raise HTTPException(status_code=403, detail="Akses ditolak")
     await db.orders.update_one(
         {"id": order_id},
-        {"$set": {"review": {"rating": rating, "komentar": (body or {}).get("komentar", ""), "created_at": datetime.now(timezone.utc)}}},
+        {"$set": {"review": {
+            "rating": rating,
+            "komentar": (body or {}).get("komentar", ""),
+            "foto_url": (body or {}).get("foto_url"),
+            "created_at": datetime.now(timezone.utc),
+        }}},
     )
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return order_public(updated)
@@ -1386,25 +1496,34 @@ async def connect(sid, environ, auth):
             if part.startswith("token="):
                 token = part.split("=", 1)[1]
     user = await _user_from_token(token)
-    if not user:
-        return False
+    if user:
+        await sio.save_session(sid, {
+            "user_id": user["user_id"],
+            "role": user.get("role", "buyer"),
+            "nama": user.get("nama") or user.get("username"),
+            "username": user.get("username"),
+        })
+        # Everyone joins their own room so they receive chat + order events;
+        # admins additionally join the broadcast room.
+        await sio.enter_room(sid, user["user_id"])
+        if user.get("role") == "admin":
+            await sio.enter_room(sid, "admins")
+        return True
+    # Guests are allowed a limited connection (live shopping interactions only).
     await sio.save_session(sid, {
-        "user_id": user["user_id"],
-        "role": user.get("role", "buyer"),
-        "nama": user.get("nama") or user.get("username"),
-        "username": user.get("username"),
+        "user_id": f"guest_{sid}",
+        "role": "guest",
+        "nama": "Tamu",
+        "username": None,
     })
-    # Everyone joins their own room so they receive chat + order events;
-    # admins additionally join the broadcast room.
-    await sio.enter_room(sid, user["user_id"])
-    if user.get("role") == "admin":
-        await sio.enter_room(sid, "admins")
     return True
 
 
 @sio.event
 async def join(sid, data):
     session = await sio.get_session(sid)
+    if session["role"] == "guest":
+        return
     room = (data or {}).get("room") or session["user_id"]
     if session["role"] != "admin" and room != session["user_id"]:
         return
@@ -1414,6 +1533,8 @@ async def join(sid, data):
 @sio.event
 async def message(sid, data):
     session = await sio.get_session(sid)
+    if session["role"] == "guest":
+        return
     room = (data or {}).get("room") if session["role"] == "admin" else session["user_id"]
     if not room:
         return
@@ -1423,6 +1544,82 @@ async def message(sid, data):
         return
     doc = await save_chat_message(room, session, text, image_url)
     await sio.emit("message", chat_public(doc), room=[room, "admins"])
+
+
+# ---- Live shopping realtime (chat + reactions, open to guests) ----
+# Tracks who is currently watching the live: sid -> {name, role, user_id}
+LIVE_VIEWERS: dict = {}
+
+
+async def _emit_live_viewers() -> None:
+    # Dedup logged-in users by user_id; guests each count once.
+    seen: dict = {}
+    order: list = []
+    for v in LIVE_VIEWERS.values():
+        key = v["user_id"] if v.get("role") != "guest" else f"g:{id(v)}"
+        if key not in seen:
+            seen[key] = {"name": v.get("name") or "Tamu", "role": v.get("role", "guest")}
+            order.append(seen[key])
+    payload = {"count": len(order), "viewers": order}
+    await sio.emit("live_viewers", payload, room=["live", "admins"])
+
+
+@sio.event
+async def join_live(sid, data):
+    await sio.enter_room(sid, "live")
+    session = await sio.get_session(sid)
+    LIVE_VIEWERS[sid] = {
+        "name": session.get("nama") or session.get("username") or "Tamu",
+        "role": session.get("role", "guest"),
+        "user_id": session.get("user_id"),
+    }
+    if LIVE_CHAT_BUFFER:
+        await sio.emit("live_chat_history", LIVE_CHAT_BUFFER[-50:], to=sid)
+    await _emit_live_viewers()
+
+
+@sio.event
+async def leave_live(sid, data):
+    await sio.leave_room(sid, "live")
+    if LIVE_VIEWERS.pop(sid, None) is not None:
+        await _emit_live_viewers()
+
+
+@sio.event
+async def disconnect(sid):
+    if LIVE_VIEWERS.pop(sid, None) is not None:
+        await _emit_live_viewers()
+
+
+@sio.event
+async def live_chat(sid, data):
+    session = await sio.get_session(sid)
+    text = ((data or {}).get("text") or "").strip()[:300]
+    if not text:
+        return
+    name = ((data or {}).get("name") or session.get("nama") or "Tamu").strip()[:40] or "Tamu"
+    msg = {
+        "id": uuid.uuid4().hex[:12],
+        "name": name,
+        "role": session.get("role", "guest"),
+        "text": text,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    LIVE_CHAT_BUFFER.append(msg)
+    if len(LIVE_CHAT_BUFFER) > 100:
+        del LIVE_CHAT_BUFFER[: len(LIVE_CHAT_BUFFER) - 100]
+    await sio.emit("live_chat", msg, room="live")
+
+
+LIVE_REACTIONS = {"❤️", "👍", "😍", "🔥", "👏", "😮"}
+
+
+@sio.event
+async def live_react(sid, data):
+    emoji = (data or {}).get("emoji") or "❤️"
+    if emoji not in LIVE_REACTIONS:
+        emoji = "❤️"
+    await sio.emit("live_react", {"emoji": emoji}, room="live")
 
 
 # Wrap FastAPI with Socket.IO. Uvicorn serves this combined `app`.

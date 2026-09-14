@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 18 — Live Shopping ENHANCEMENTS (caption / show_cart / require_login toggles + guest Socket.IO chat/reactions). ALL requested flows PASS end-to-end. Backend: 13/13 pytest cases pass (sequential run; a couple flake only under 2-worker xdist due to rapid parallel Socket.IO connect races through the ingress, NOT a code bug). REST verified: POST /api/live/start persists + returns caption, show_cart, require_login and whatsapp (from profil_admin) — defaults show_cart=true, require_login=false, caption=''. GET /api/live/current mirrors the same fields when live; returns {live:false} when stopped. POST /api/live/stop clears the in-memory chat buffer (buffered messages before stop DO NOT reappear in live_chat_history after a subsequent start). Socket.IO (path /api/socket.io): guests without a token can now connect (previously rejected). join_live enters the 'live' room and receives live_chat_history (last 50) when buffer is non-empty. live_chat broadcasts {id,name,role,text,ts} to 'live' and buffers. live_react broadcasts and falls back to ❤️ for unknown emoji. Security still holds: guest 'join' (private chat room) and 'message' handlers silently reject (no chat_message doc saved, no room joined); non-admin buyers cannot join arbitrary rooms via 'join'. Admin-only /live/start and /live/stop still enforced (401/403 for guest/buyer). Frontend: admin /dashboard/live shows Judul, Caption, 'Tampilkan Keranjang Produk' toggle, 'Wajib Login untuk Menonton' toggle, product picker and start-live — starting shows LIVE badge, caption text, 'Keranjang tampil' + 'Wajib login' meta chips, and share/stop buttons. Viewer /live: (a) require_login=true + guest → login gate with 'Login untuk menonton' + Masuk/Daftar CTA (testID live-login). (b) show_cart=true + require_login=false + guest → full viewer: LIVE badge, title, caption, WA/Share/Close buttons, 6 reaction emojis + purple like (floating hearts), guest-writable chat input+send (message 'Hi from guest tester' broadcast back to same client), product strip with card→/produk/[id], purple cart FAB→/toko. (c) show_cart=false → product strip + cart FAB fully hidden; chat/reactions still work. Cleanup executed — live stopped, /api/live/current returns {live:false}.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_live_enhancements.py",
+    "/app/test_reports/pytest/pytest_iter18_live_enhancements.xml",
+    "/app/test_reports/screenshots/iter18_no_live.jpeg",
+    "/app/test_reports/screenshots/iter18_admin_form.jpeg",
+    "/app/test_reports/screenshots/iter18_admin_live.jpeg",
+    "/app/test_reports/screenshots/iter18_viewer_gate.jpeg",
+    "/app/test_reports/screenshots/iter18_viewer_live_guest.jpeg",
+    "/app/test_reports/screenshots/iter18_viewer_after_chat.jpeg",
+    "/app/test_reports/screenshots/iter18_no_cart_mode.jpeg"
+  ],
+  "action_items": [
+    "No functional issues found in the new enhancement scope. Iteration 17's OPEN critical item (GET /api/live/token?role=host now requires admin — server.py:594-611) has been fixed and verified in this run: guest & buyer now get 403, admin gets 200 with role='host'. Consider closing that issue in the tracker."
+  ],
+  "critical_code_review_comments": [
+    "server.py:518 still imports agora_token_builder mid-file. Cosmetic; move to top of imports for consistency (unchanged from iter17).",
+    "server.py:1548 join_live has no rate-limit or auth-gating — any guest can enter the 'live' room. That is the desired behavior per spec, but note the LIVE_CHAT_BUFFER only trims at >100 messages and the live_chat handler has no per-sid throttling; a spammer could saturate viewers. Consider a token-bucket in live_chat (e.g. 1 msg/sec/sid) for production.",
+    "frontend live.tsx:57 `join` is redefined every render but only referenced inside a useEffect with [active] dep; harmless but could be moved into the effect body to avoid the eslint disable pattern.",
+    "frontend live.tsx:210 like-button emits sendReaction('❤️'), which triggers the SAME server broadcast as the react rail's ❤️ button — the client also appends a floating heart via the socket round-trip, so tapping like optimistically shows a heart only after the server echo (small perceived latency on slow networks). Optional: add an immediate local floats.push before emit.",
+    "frontend dashboard/live.tsx:104-105 uses `containerTestID` for M3TextField but there's no testID on the inner TextInput itself. A dedicated `testID` prop for the input would make selectors more robust."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_live_enhancements.py (new)",
+    "/app/test_reports/iteration_18.json (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 pytest tests pass sequentially; 10/13 under 2-worker xdist due to ingress connection race — not a code bug)",
+    "frontend": "100% (admin start with caption + both toggles, LIVE badge + meta chips, guest login gate when require_login=true, full guest viewer with chat+reactions+products, show_cart=false correctly hides product strip and cart FAB, product card→/produk/[id], cart FAB→/toko)"
+  },
+  "seed_data_creation": "No persistent seed. Test live shows (TEST_ENH_LIVE, TEST_DEFAULTS, Iter18 Guest Test, Iter18 NoCart) all set to status='ended' via /api/live/stop; final verification /api/live/current returns {live:false}.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The Socket.IO path is /api/socket.io on EXPO_PUBLIC_BACKEND_URL. Guests can now connect (no token). Live channel is 'dianastuff_live'. LIVE_CHAT_BUFFER is in-memory and reset on /live/start and /live/stop. When testing parallel Socket.IO clients against the preview URL, prefer sequential (-p no:xdist or -o addopts=) to avoid ingress connect races. Admin whitelist login endpoint is POST /api/auth/login-whitelist and returns {session_token, user}. Login page requires clicking 'Login Whitelist' tab first (Login Gmail is default). Viewer testIDs: live-wa, live-share, live-close, live-like, live-react-<emoji>, live-chat-input, live-chat-send, live-cart, live-product-<id>, live-login. Admin dashboard testIDs: live-title (container), live-caption (container — inner TextInput has no direct testID), toggle-cart, toggle-login, live-pick-<id>, start-live, stop-live, share-live.",
+  "rca_of_issue": "N/A — no bugs found in the enhancement scope. Iteration 17's host-token security gap was independently verified fixed (guest/buyer → 403, admin → 200 with role='host')."
+}

@@ -77,6 +77,10 @@ export function NotificationListener() {
       if (user.role === "admin" || !order) return;
       queryClient.invalidateQueries({ queryKey: ["orders"] });
       queryClient.invalidateQueries({ queryKey: ["order", order.id] });
+      if (order.status === "selesai") {
+        toast.show(`Pesanan ${order.no_order ?? ""} selesai. Yuk beri ulasan ⭐`.trim(), "success");
+        return;
+      }
       const label = STATUS_LABEL[order.status] ?? order.status;
       toast.show(`Pesanan ${order.no_order ?? ""}: ${label}`.trim(), "info");
     });

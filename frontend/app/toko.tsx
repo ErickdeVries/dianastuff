@@ -46,6 +46,12 @@ export default function TokoScreen() {
     queryFn: () => apiRequest<Product[]>(`/api/products${search ? `?search=${encodeURIComponent(search)}` : ""}`, { auth: false }),
   });
 
+  const { data: live } = useQuery<{ live: boolean; title?: string }>({
+    queryKey: ["live", "current"],
+    queryFn: () => apiRequest<{ live: boolean; title?: string }>("/api/live/current", { auth: false }),
+    refetchInterval: 10000,
+  });
+
   const categories = useMemo(() => {
     const set = new Set<string>();
     (data ?? []).forEach((p) => p.kategori && set.add(p.kategori));
@@ -115,6 +121,15 @@ export default function TokoScreen() {
           </Pressable>
         </View>
       </View>
+
+      {live?.live ? (
+        <Pressable testID="live-banner" style={styles.liveBanner} onPress={() => router.push("/live")}>
+          <View style={styles.liveDot} />
+          <MaterialDesignIcons name="access-point" size={20} color="#fff" />
+          <Text style={styles.liveBannerText} numberOfLines={1}>Sedang LIVE — {live.title ?? "Tonton sekarang"}</Text>
+          <MaterialDesignIcons name="chevron-right" size={20} color="#fff" />
+        </Pressable>
+      ) : null}
 
       <View style={styles.searchWrap}>
         <MaterialDesignIcons name="magnify" size={20} color={colors.muted} />
@@ -194,6 +209,19 @@ const useStyles = makeStyles((colors) => ({
     paddingHorizontal: 4,
   },
   badgeText: { fontFamily: fonts.bodyMedium, fontSize: 10, color: colors.onBrandPrimary },
+  liveBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.error,
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#fff" },
+  liveBannerText: { flex: 1, fontFamily: fonts.bodyMedium, fontSize: 14, color: "#fff" },
   searchWrap: {
     flexDirection: "row",
     alignItems: "center",
