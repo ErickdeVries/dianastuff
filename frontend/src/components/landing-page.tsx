@@ -31,6 +31,14 @@ const FEATURES = [
 // Setelah build Android jadi, APK dilayani via backend: .../api/download/app.apk
 const APK_URL = "";
 
+const INSTALL_STEPS = [
+  "Tekan tombol “Unduh APK Android”, lalu buka file yang terunduh.",
+  "Jika browser menampilkan “File mungkin berbahaya”, pilih “Tetap unduh” / “Download anyway” — aplikasi ini aman karena dibagikan langsung oleh toko.",
+  "Jika muncul “Install diblokir”, pilih “Setelan” lalu aktifkan “Izinkan dari sumber ini”.",
+  "Jika Play Protect memperingatkan “Aplikasi tidak dikenal”, pilih “Tetap install” / “Install anyway”.",
+  "Selesai — buka aplikasi dianastuff dan mulai belanja!",
+];
+
 function waLink(no: string): string {
   let d = (no || "").replace(/\D/g, "");
   if (d.startsWith("620")) d = `62${d.slice(3)}`;
@@ -189,7 +197,16 @@ export function LandingPage() {
               <Text style={[styles.ctaPrimaryText, { color: colors.muted }]}>APK Segera Hadir</Text>
             </View>
           )}
-          <Text style={styles.apkNote}>Saat install, pilih “Izinkan dari sumber ini” jika diminta.</Text>
+
+          <View style={styles.stepsBox}>
+            <Text style={styles.stepsTitle}>Cara Install (2 menit)</Text>
+            {INSTALL_STEPS.map((s, i) => (
+              <View key={i} style={styles.stepRow}>
+                <View style={styles.stepNum}><Text style={styles.stepNumText}>{i + 1}</Text></View>
+                <Text style={styles.stepText}>{s}</Text>
+              </View>
+            ))}
+          </View>
         </View>
       </View>
 
@@ -310,6 +327,12 @@ const useStyles = makeStyles((colors) => ({
   apkDesc: { fontFamily: fonts.body, fontSize: 14, lineHeight: 22, color: colors.muted, textAlign: "center", marginTop: 8, marginBottom: 20, maxWidth: 480 },
   apkSoon: { backgroundColor: colors.surfaceTertiary },
   apkNote: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, marginTop: 12, textAlign: "center" },
+  stepsBox: { width: "100%", maxWidth: 520, marginTop: 24, backgroundColor: colors.surfaceTertiary, borderRadius: 16, padding: 18, gap: 12 },
+  stepsTitle: { fontFamily: fonts.heading, fontSize: 15, color: colors.onSurface, marginBottom: 2 },
+  stepRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
+  stepNum: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center", marginTop: 1 },
+  stepNumText: { fontFamily: fonts.bodyMedium, fontSize: 13, color: colors.onBrandPrimary },
+  stepText: { flex: 1, fontFamily: fonts.body, fontSize: 13, lineHeight: 20, color: colors.onSurfaceTertiary },
 
   // Tentang
   aboutSection: { backgroundColor: colors.surfaceTertiary },

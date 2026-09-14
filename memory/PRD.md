@@ -276,3 +276,6 @@ Inter body. Language: Indonesian.
 - Endpoint `GET /api/download/app.apk` (backend) siap melayani APK dari
   backend/static_downloads/app.apk sebagai dianastuff.apk. TIDAK ada link .aab di landing
   (AAB hanya untuk Play Store nanti). web.zip sudah di-rebuild berisi section ini.
+- Panduan install APK ditambahkan di section unduh (INSTALL_STEPS): tetap unduh saat browser
+  memperingatkan "file mungkin berbahaya", izinkan sumber tidak dikenal, "Tetap install" saat
+  Play Protect memperingatkan. web.zip di-rebuild.
