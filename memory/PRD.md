@@ -279,3 +279,14 @@ Inter body. Language: Indonesian.
 - Panduan install APK ditambahkan di section unduh (INSTALL_STEPS): tetap unduh saat browser
   memperingatkan "file mungkin berbahaya", izinkan sumber tidak dikenal, "Tetap install" saat
   Play Protect memperingatkan. web.zip di-rebuild.
+
+## FIX (2026-06 fork — Cloudflare blank putih)
+- Laporan "blank putih setelah deploy Cloudflare" diverifikasi testing_agent: situs dianastuff.com
+  TIDAK blank (7/7 lolos, tanpa error JS fatal). Penyebab: cache/service worker HP atau bundle
+  2.9MB tanpa indikator loading (tampak putih saat load lambat).
+- FIX: suntik splash loading inline (logo D ungu + spinner + "Memuat dianastuff...") ke
+  dist/index.html agar tidak tampak blank saat memuat.
+- web.zip di-rebuild menunjuk backend PRODUKSI https://diana-store-2.emergent.host (bukan preview)
+  via `EXPO_PUBLIC_BACKEND_URL=... npx expo export -p web --clear`. Tertanam 8x, 0 preview.
+- CATATAN PENTING: backend produksi pakai DB produksi (bisa beda data dengan dev).
+  Link download web.zip dilayani backend preview (/api/download/web.zip).
