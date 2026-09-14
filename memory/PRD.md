@@ -127,6 +127,11 @@ Inter body. Language: Indonesian.
 - Hapus banner/logo tanpa mengganti: chip trash (banner) + tombol "Hapus Logo" (logo) dengan
   ConfirmDialog; onDeleteImage PUT /api/profil_admin dengan url null. Tombol upload logo dibuat
   eksplisit ("+ Tambah Logo"/"Ubah Logo") agar jelas di Android.
+- FIX upload mati total di APK Android: pasang dependency eksplisit `expo-image-loader` (modul
+  native wajib expo-image-picker yang tidak ter-bundle di release build — jalan di Expo Go, mati
+  di APK). uploads.ts: skip permission request di Android (system photo picker tak butuh izin),
+  picker dibungkus try/catch agar error muncul (tidak silent). Tombol simpan profil dikunci saat
+  upload berjalan. HARUS diverifikasi user lewat build APK baru (tak bisa dites headless).
 
 
 ## Next Tasks

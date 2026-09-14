@@ -286,7 +286,7 @@ export default function ProfilScreen() {
         </View>
       ) : null}
 
-      <M3Button testID="save-profil" label="Simpan Perubahan" variant="filled" loading={saving} onPress={onSave} style={{ marginTop: 8 }} />
+      <M3Button testID="save-profil" label="Simpan Perubahan" variant="filled" loading={saving} disabled={uploading !== null} onPress={onSave} style={{ marginTop: 8 }} />
 
       <ConfirmDialog
         visible={!!confirmDelete}
