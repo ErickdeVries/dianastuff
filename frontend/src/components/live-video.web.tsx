@@ -5,9 +5,11 @@ import { View } from "react-native";
 import { getLiveToken } from "@/src/api/live";
 
 export type LiveFilterId = "none" | "halus" | "cerah" | "vivid" | "jernih" | "lowlight";
+export type LiveQuality = "HD" | "normal" | "hemat";
 export type LiveVideoHandle = {
   switchCamera: () => void;
-  applyFilter: (id: LiveFilterId) => void;
+  applyFilter: (id: LiveFilterId, level?: number) => void;
+  setQuality: (q: LiveQuality) => void;
 };
 
 type Props = { role: "host" | "audience"; style?: any };
@@ -15,7 +17,7 @@ type Props = { role: "host" | "audience"; style?: any };
 export const LiveVideo = forwardRef<LiveVideoHandle, Props>(function LiveVideo({ role, style }, ref) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  useImperativeHandle(ref, () => ({ switchCamera: () => {}, applyFilter: () => {} }), []);
+  useImperativeHandle(ref, () => ({ switchCamera: () => {}, applyFilter: () => {}, setQuality: () => {} }), []);
 
   useEffect(() => {
     let client: any;

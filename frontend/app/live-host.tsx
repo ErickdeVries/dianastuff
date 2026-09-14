@@ -1,4 +1,5 @@
 import MaterialDesignIcons from "@react-native-vector-icons/material-design-icons";
+import Slider from "@react-native-community/slider";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -9,11 +10,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { stopLive } from "@/src/api/live";
 import { ConfirmDialog } from "@/src/components/confirm-dialog";
 import { FloatingEmoji } from "@/src/components/floating-emoji";
-import { LiveVideo, LiveVideoHandle, LiveFilterId } from "@/src/components/live-video";
+import { LiveVideo, LiveVideoHandle, LiveFilterId, LiveQuality } from "@/src/components/live-video";
 import { useAuth } from "@/src/context/auth";
 import { useToast } from "@/src/context/toast";
 import { connectSocket } from "@/src/lib/socket";
-import { fonts, makeStyles } from "@/src/theme";
+import { fonts, makeStyles, useTheme } from "@/src/theme";
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -29,8 +30,15 @@ const FILTERS: { id: LiveFilterId; label: string; icon: string }[] = [
   { id: "lowlight", label: "Low Light", icon: "weather-night" },
 ];
 
+const QUALITIES: { id: LiveQuality; label: string }[] = [
+  { id: "HD", label: "HD" },
+  { id: "normal", label: "Normal" },
+  { id: "hemat", label: "Hemat Data" },
+];
+
 export default function LiveHostScreen() {
   const styles = useStyles();
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const toast = useToast();
@@ -46,9 +54,12 @@ export default function LiveHostScreen() {
   const [floats, setFloats] = useState<{ key: string; emoji: string; offset: number }[]>([]);
   const [filterOpen, setFilterOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<LiveFilterId>("none");
+  const [beautyLevel, setBeautyLevel] = useState(0.6);
+  const [quality, setQuality] = useState<LiveQuality>("normal");
   const [actionMsg, setActionMsg] = useState<LiveChatMsg | null>(null);
   const [confirmStop, setConfirmStop] = useState(false);
   const chatRef = useRef<FlatList<LiveChatMsg>>(null);
+  const showBeauty = activeFilter === "halus" || activeFilter === "cerah";
 
   useEffect(() => {
     let alive = true;
@@ -138,7 +149,19 @@ export default function LiveHostScreen() {
 
   const pickFilter = (id: LiveFilterId) => {
     setActiveFilter(id);
-    videoRef.current?.applyFilter(id);
+    videoRef.current?.applyFilter(id, beautyLevel);
+  };
+
+  const onBeautyChange = (v: number) => {
+    setBeautyLevel(v);
+    if (activeFilter === "halus" || activeFilter === "cerah") {
+      videoRef.current?.applyFilter(activeFilter, v);
+    }
+  };
+
+  const pickQuality = (q: LiveQuality) => {
+    setQuality(q);
+    videoRef.current?.setQuality(q);
   };
 
   if (user?.role !== "admin") {
@@ -155,7 +178,7 @@ export default function LiveHostScreen() {
       <LiveVideo ref={videoRef} role="host" style={styles.videoFill} />
 
       {/* Top overlay */}
-      <View style={[styles.topRow, { top: insets.top + 8 }]}>
+      <View style={[styles.topRow, { top: insets.top + 16 }]}>
         <View style={styles.topLeft}>
           <View style={styles.liveBadge}><View style={styles.dot} /><Text style={styles.liveBadgeText}>LIVE</Text></View>
           <Pressable testID="host-viewers" style={styles.viewerPill} onPress={() => setViewersOpen(true)}>
@@ -179,9 +202,9 @@ export default function LiveHostScreen() {
         </View>
       </View>
 
-      {/* Filter selector */}
+      {/* Filter + quality + beauty panel */}
       {filterOpen ? (
-        <View style={[styles.filterRow, { top: insets.top + 56 }]}>
+        <View style={[styles.filterPanel, { top: insets.top + 64 }]}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 4 }}>
             {FILTERS.map((f) => {
               const on = activeFilter === f.id;
@@ -193,12 +216,40 @@ export default function LiveHostScreen() {
               );
             })}
           </ScrollView>
+
+          <View style={styles.qualityRow}>
+            <MaterialDesignIcons name="quality-high" size={16} color="#fff" />
+            {QUALITIES.map((q) => (
+              <Pressable key={q.id} testID={`quality-${q.id}`} style={[styles.qChip, quality === q.id && styles.qChipOn]} onPress={() => pickQuality(q.id)}>
+                <Text style={styles.qText}>{q.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {showBeauty ? (
+            <View style={styles.beautyRow}>
+              <MaterialDesignIcons name="star-four-points-outline" size={16} color="#fff" />
+              <Text style={styles.beautyLabel}>Beauty</Text>
+              <Slider
+                testID="beauty-slider"
+                style={{ flex: 1, height: 36 }}
+                minimumValue={0}
+                maximumValue={1}
+                value={beautyLevel}
+                onValueChange={onBeautyChange}
+                minimumTrackTintColor={colors.brandPrimary}
+                maximumTrackTintColor="rgba(255,255,255,0.3)"
+                thumbTintColor="#fff"
+              />
+              <Text style={styles.beautyVal}>{Math.round(beautyLevel * 100)}</Text>
+            </View>
+          ) : null}
         </View>
       ) : null}
 
       {/* Pinned banner */}
       {pinned ? (
-        <View style={[styles.pinnedBanner, { top: insets.top + (filterOpen ? 108 : 56) }]}>
+        <View style={[styles.pinnedBanner, { top: insets.top + (filterOpen ? (showBeauty ? 220 : 172) : 64) }]}>
           <MaterialDesignIcons name="pin" size={14} color="#fff" />
           <Text style={styles.pinnedText} numberOfLines={2}>
             <Text style={styles.pinnedName}>{pinned.name}: </Text>{pinned.text}
@@ -344,9 +395,17 @@ const useStyles = makeStyles((colors) => ({
   stopBtn: { backgroundColor: colors.error },
 
   filterRow: { position: "absolute", left: 8, right: 8 },
+  filterPanel: { position: "absolute", left: 8, right: 8, gap: 8, backgroundColor: "rgba(0,0,0,0.35)", borderRadius: 16, paddingVertical: 8 },
   filterChip: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.5)", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1.5, borderColor: "transparent" },
   filterChipOn: { borderColor: "#fff", backgroundColor: "rgba(168,85,247,0.7)" },
   filterText: { color: "#fff", fontFamily: fonts.bodyMedium, fontSize: 12 },
+  qualityRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8 },
+  qChip: { backgroundColor: "rgba(0,0,0,0.5)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1.5, borderColor: "transparent" },
+  qChipOn: { borderColor: "#fff", backgroundColor: "rgba(168,85,247,0.7)" },
+  qText: { color: "#fff", fontFamily: fonts.bodyMedium, fontSize: 12 },
+  beautyRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8 },
+  beautyLabel: { color: "#fff", fontFamily: fonts.bodyMedium, fontSize: 12 },
+  beautyVal: { color: "#fff", fontFamily: fonts.bodyMedium, fontSize: 12, width: 26, textAlign: "right" },
 
   pinnedBanner: { position: "absolute", left: 12, right: 12, flexDirection: "row", alignItems: "flex-start", gap: 6, backgroundColor: "rgba(168,85,247,0.85)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 7 },
   pinnedText: { flex: 1, fontFamily: fonts.body, fontSize: 13, color: "#fff" },

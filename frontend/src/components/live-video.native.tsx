@@ -12,9 +12,11 @@ import { getLiveToken } from "@/src/api/live";
 import { fonts, useTheme } from "@/src/theme";
 
 export type LiveFilterId = "none" | "halus" | "cerah" | "vivid" | "jernih" | "lowlight";
+export type LiveQuality = "HD" | "normal" | "hemat";
 export type LiveVideoHandle = {
   switchCamera: () => void;
-  applyFilter: (id: LiveFilterId) => void;
+  applyFilter: (id: LiveFilterId, level?: number) => void;
+  setQuality: (q: LiveQuality) => void;
 };
 
 type Props = { role: "host" | "audience"; style?: any };
@@ -43,9 +45,10 @@ export const LiveVideo = forwardRef<LiveVideoHandle, Props>(function LiveVideo({
         engineRef.current?.switchCamera();
       } catch {}
     },
-    applyFilter: (id: LiveFilterId) => {
+    applyFilter: (id: LiveFilterId, level?: number) => {
       const e = engineRef.current;
       if (!e) return;
+      const lv = typeof level === "number" ? Math.max(0, Math.min(1, level)) : 0.6;
       // Reset all enhancers first.
       try { e.setBeautyEffectOptions(false, {}); } catch {}
       try { e.setColorEnhanceOptions(false, {}); } catch {}
@@ -55,9 +58,9 @@ export const LiveVideo = forwardRef<LiveVideoHandle, Props>(function LiveVideo({
       try { e.enableExtension("agora_video_filters_clear_vision", "clear_vision", true); } catch {}
       try {
         if (id === "halus") {
-          e.setBeautyEffectOptions(true, { lighteningContrastLevel: 1, lighteningLevel: 0.5, smoothnessLevel: 0.7, rednessLevel: 0.3, sharpnessLevel: 0.4 });
+          e.setBeautyEffectOptions(true, { lighteningContrastLevel: 1, lighteningLevel: 0.4 + lv * 0.3, smoothnessLevel: lv, rednessLevel: 0.3, sharpnessLevel: 0.4 });
         } else if (id === "cerah") {
-          e.setBeautyEffectOptions(true, { lighteningContrastLevel: 2, lighteningLevel: 0.9, smoothnessLevel: 0.4, rednessLevel: 0.2, sharpnessLevel: 0.2 });
+          e.setBeautyEffectOptions(true, { lighteningContrastLevel: 2, lighteningLevel: lv, smoothnessLevel: 0.3 + lv * 0.3, rednessLevel: 0.2, sharpnessLevel: 0.2 });
         } else if (id === "vivid") {
           e.setColorEnhanceOptions(true, { strengthLevel: 0.7, skinProtectLevel: 0.7 });
         } else if (id === "jernih") {
@@ -66,6 +69,17 @@ export const LiveVideo = forwardRef<LiveVideoHandle, Props>(function LiveVideo({
           e.setLowlightEnhanceOptions(true, {});
         }
       } catch {}
+    },
+    setQuality: (q: LiveQuality) => {
+      const e = engineRef.current;
+      if (!e) return;
+      const cfg =
+        q === "HD"
+          ? { dimensions: { width: 1280, height: 720 }, frameRate: 24, bitrate: 0 }
+          : q === "hemat"
+            ? { dimensions: { width: 480, height: 360 }, frameRate: 15, bitrate: 400 }
+            : { dimensions: { width: 640, height: 480 }, frameRate: 15, bitrate: 0 };
+      try { e.setVideoEncoderConfiguration(cfg); } catch {}
     },
   }), []);
 

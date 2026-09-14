@@ -227,3 +227,12 @@ Inter body. Language: Indonesian.
   (bukan Expo Go/web) — WAJIB diverifikasi user via build.
 - Diverifikasi layout full-screen via screenshot web (video hitam di web itu wajar krn kamera host
   hanya aktif di build). Backend live_react fanout ke admins sudah diuji.
+
+## Implemented (2026-06 fork — Studio Live: notch fix, kualitas video, beauty slider)
+- Kontrol atas studio diturunkan ke insets.top + 16 agar tombol ganti kamera tidak tertutup
+  notch/dynamic island HP.
+- Kualitas video: chip HD / Normal / Hemat Data -> LiveVideo.setQuality (Agora
+  setVideoEncoderConfiguration: HD 1280x720@24, Normal 640x480@15, Hemat 480x360@15 bitrate 400).
+- Beauty slider (@react-native-community/slider) muncul saat filter Halus/Cerah -> atur
+  smoothness/lightening via applyFilter(id, level 0..1) real-time.
+- Hanya aktif di build HP asli (Agora); di web/Expo Go video hitam (wajar).
