@@ -208,3 +208,22 @@ Inter body. Language: Indonesian.
 - Nonton tanpa install: link `${BASE}/live` jalan di browser HP untuk tamu (Expo web).
 - Diverifikasi: socket probe (featured start/change, guest chat->admin, pin, mute+block chat,
   kick+remove viewer, recap) + screenshot viewer (bar sorot) & admin (chips sorot, panel komentar, rekap).
+
+## Implemented (2026-06 fork — Studio Live full-screen host + kamera)
+- Layar host live dipindah ke full-screen `/app/live-host.tsx` (route top-level, tanpa drawer/header)
+  meniru layout penonton: video absolute fill, overlay transparan (LIVE+eye, chat, pinned).
+  Sebelumnya host tampil setengah layar + kotak hitam di dalam drawer.
+- `dashboard/live.tsx`: form setup (belum live) -> saat "Mulai Siaran Live" sukses push ke
+  `/live-host`. Saat sudah live tampil kartu ringkas + tombol "Buka Studio Live" / Rekap / Akhiri.
+- Kontrol host di studio: ganti kamera depan/belakang (`switchCamera`) TANPA akhiri live;
+  selector filter kamera (Normal/Halus/Cerah/Vivid/Jernih/Low Light) via `applyFilter`; share;
+  tombol power (akhiri, pakai ConfirmDialog); eye count -> modal penonton (bisukan/keluarkan);
+  komentar live transparan (tap komentar -> action sheet Pin/Bisukan/Keluarkan); input balas;
+  hati/emoji beterbangan (live_react kini diemit ke ["live","admins"] agar host lihat).
+- `LiveVideo` (native/web/fallback) kini `forwardRef` dgn handle {switchCamera, applyFilter}.
+  Native pakai Agora: setBeautyEffectOptions (halus/cerah), setColorEnhanceOptions (vivid),
+  setVideoDenoiserOptions (jernih), setLowlightEnhanceOptions (low light), switchCamera().
+  SEMUA dibungkus try/catch + enableExtension clear_vision. HANYA jalan di build HP asli
+  (bukan Expo Go/web) — WAJIB diverifikasi user via build.
+- Diverifikasi layout full-screen via screenshot web (video hitam di web itu wajar krn kamera host
+  hanya aktif di build). Backend live_react fanout ke admins sudah diuji.

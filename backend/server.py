@@ -1728,7 +1728,7 @@ async def live_react(sid, data):
     if emoji not in LIVE_REACTIONS:
         emoji = "❤️"
     LIVE_STATS["total_likes"] = LIVE_STATS.get("total_likes", 0) + 1
-    await sio.emit("live_react", {"emoji": emoji}, room="live")
+    await sio.emit("live_react", {"emoji": emoji}, room=["live", "admins"])
 
 
 # ---- Admin moderation (pin / mute / kick) ----

@@ -1,13 +1,21 @@
 // Live video — WEB implementation (agora-rtc-sdk-ng). Audience only on web.
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { View } from "react-native";
 
 import { getLiveToken } from "@/src/api/live";
 
+export type LiveFilterId = "none" | "halus" | "cerah" | "vivid" | "jernih" | "lowlight";
+export type LiveVideoHandle = {
+  switchCamera: () => void;
+  applyFilter: (id: LiveFilterId) => void;
+};
+
 type Props = { role: "host" | "audience"; style?: any };
 
-export function LiveVideo({ role, style }: Props) {
+export const LiveVideo = forwardRef<LiveVideoHandle, Props>(function LiveVideo({ role, style }, ref) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useImperativeHandle(ref, () => ({ switchCamera: () => {}, applyFilter: () => {} }), []);
 
   useEffect(() => {
     let client: any;
@@ -52,4 +60,4 @@ export function LiveVideo({ role, style }: Props) {
       <div ref={containerRef} style={{ width: "100%", height: "100%", background: "#000" }} />
     </View>
   );
-}
+});

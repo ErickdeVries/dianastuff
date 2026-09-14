@@ -1,12 +1,21 @@
 // Live video — NATIVE implementation (react-native-agora).
 // Loaded via runtime require so Expo Go (which lacks the native module) shows
 // a friendly message instead of crashing. Full video works only in a build.
+//
+// Exposes an imperative handle so the host screen can switch camera and apply
+// camera filters without tearing down the live session.
 import MaterialDesignIcons from "@react-native-vector-icons/material-design-icons";
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { PermissionsAndroid, Platform, Text, View } from "react-native";
 
 import { getLiveToken } from "@/src/api/live";
 import { fonts, useTheme } from "@/src/theme";
+
+export type LiveFilterId = "none" | "halus" | "cerah" | "vivid" | "jernih" | "lowlight";
+export type LiveVideoHandle = {
+  switchCamera: () => void;
+  applyFilter: (id: LiveFilterId) => void;
+};
 
 type Props = { role: "host" | "audience"; style?: any };
 
@@ -18,7 +27,7 @@ try {
   Agora = null;
 }
 
-export function LiveVideo({ role, style }: Props) {
+export const LiveVideo = forwardRef<LiveVideoHandle, Props>(function LiveVideo({ role, style }, ref) {
   const { colors } = useTheme();
   const engineRef = useRef<any>(null);
   const [remoteUid, setRemoteUid] = useState<number | null>(null);
@@ -27,6 +36,38 @@ export function LiveVideo({ role, style }: Props) {
     role === "host" ? 1 : Math.floor(Math.random() * 2_000_000_000) + 2,
   );
   const [err, setErr] = useState<string | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    switchCamera: () => {
+      try {
+        engineRef.current?.switchCamera();
+      } catch {}
+    },
+    applyFilter: (id: LiveFilterId) => {
+      const e = engineRef.current;
+      if (!e) return;
+      // Reset all enhancers first.
+      try { e.setBeautyEffectOptions(false, {}); } catch {}
+      try { e.setColorEnhanceOptions(false, {}); } catch {}
+      try { e.setLowlightEnhanceOptions(false, {}); } catch {}
+      try { e.setVideoDenoiserOptions(false, {}); } catch {}
+      // Enable the clear-vision extension for colour/low-light filters.
+      try { e.enableExtension("agora_video_filters_clear_vision", "clear_vision", true); } catch {}
+      try {
+        if (id === "halus") {
+          e.setBeautyEffectOptions(true, { lighteningContrastLevel: 1, lighteningLevel: 0.5, smoothnessLevel: 0.7, rednessLevel: 0.3, sharpnessLevel: 0.4 });
+        } else if (id === "cerah") {
+          e.setBeautyEffectOptions(true, { lighteningContrastLevel: 2, lighteningLevel: 0.9, smoothnessLevel: 0.4, rednessLevel: 0.2, sharpnessLevel: 0.2 });
+        } else if (id === "vivid") {
+          e.setColorEnhanceOptions(true, { strengthLevel: 0.7, skinProtectLevel: 0.7 });
+        } else if (id === "jernih") {
+          e.setVideoDenoiserOptions(true, {});
+        } else if (id === "lowlight") {
+          e.setLowlightEnhanceOptions(true, {});
+        }
+      } catch {}
+    },
+  }), []);
 
   useEffect(() => {
     if (!Agora?.createAgoraRtcEngine) {
@@ -114,4 +155,4 @@ export function LiveVideo({ role, style }: Props) {
       )}
     </View>
   );
-}
+});
