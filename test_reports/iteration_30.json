@@ -1,0 +1,31 @@
+{
+  "summary": "Iter30 — validated (a) live_welcome field in profil_admin and (b) auto welcome greeting on live/presence first-join. Created /app/backend/tests/test_iter30_live_welcome.py with 9 pytest cases — ALL PASS serially (pytest-xdist parallel run causes false failures due to shared live-show state; test file is safe when run with `-n 0`). Frontend verified: /dashboard/profil renders 'Sapaan Otomatis Live' multiline field with testID profil-live-welcome, pre-filled with the saved template (default 'Halo {nama}, selamat datang di live {toko}! 🎉 Selamat belanja ya 😍'), edited value persists via save-profil, and hint text mentions both {nama} and {toko}. /product-form loads without crash for admin; product-nama, add-photo, ai-generate-info testIDs present; ai-generate-info correctly aria-disabled=true when 0 photos; ver-prev-*/ver-next-* rightly render 0 with no versions (code review in product-form.tsx confirms these are only rendered when f.versions.length>1, with correct Asli/vN label at lines 227-244). Cleanup complete: default template restored, no live show active, no residual TEST_iter30 recap.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter30_live_welcome.py",
+    "/app/test_reports/pytest/pytest_iter30.xml",
+    "/app/test_reports/screenshots/iter30_profil.jpeg",
+    "/app/test_reports/screenshots/iter30_productform.jpeg"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 2123 lines — still recommend splitting into auth/live/products/ai modules for maintainability.",
+    "In live_presence_post (server.py ~L1010) the 'first-join' check is `existing = find_one({uid})` — presence docs are pruned after 60s of inactivity (line 1061). If a viewer stays quiet >60s and re-sends presence, they'll get a second welcome. Consider a permanent per-show 'welcomed_uids' set on live_shows if the intent is strict once-per-session.",
+    "The welcome message uses viewer['name'] from live_presence_post at L1009 — for authenticated viewers the anti-spoof branch replaces it with viewer['name'] (account name), so the greeting always addresses the real user. Good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter30_live_welcome.py (new)"
+  ],
+  "success_rate": {"backend": "100% (9/9 serial)", "frontend": "100% of what web preview allows"},
+  "seed_data_creation": "Created a temporary live show 'TEST_iter30_welcome' during backend tests; stopped and its recap deleted in fixture teardown. Profile mutated then restored to default template via API. No residual test data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run this suite with `pytest -n 0` (serialised) — the file uses module-scoped fixtures that start ONE live show and mutate profil_admin; pytest-xdist's 2-worker parallel default causes state races (welcome/join messages missing because a parallel worker stopped the show). Emojis in bash/curl bodies need proper quoting; prefer sending PUT payloads through Python `requests` (as this suite does).",
+  "rca_of_issue": "N/A — feature works end-to-end. Initial parallel-worker test failures were RCA'd to pytest-xdist LoadScopeScheduling giving both workers separate module-fixture instances that competed for the single global live show and single profil_admin doc; serialised run makes fixture setup/teardown deterministic and all 9 tests pass."
+}

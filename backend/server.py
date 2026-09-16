@@ -165,6 +165,7 @@ class ProfilUpdate(BaseModel):
     rekening_bank: List[RekeningBank] = Field(default_factory=list)
     whatsapp: str = ""
     kurir_list: Optional[List[str]] = None
+    live_welcome: Optional[str] = None
 
 
 class AddressUpdate(BaseModel):
@@ -194,6 +195,7 @@ class OngkirIn(BaseModel):
 
 
 DEFAULT_KURIR = ["JNE", "J&T", "Lion Parcel", "Gosend Instan/Sameday"]
+DEFAULT_LIVE_WELCOME = "Halo {nama}, selamat datang di live {toko}! 🎉 Selamat belanja ya 😍"
 
 
 # ---------------------------------------------------------------------------
@@ -1026,6 +1028,23 @@ async def live_presence_post(payload: LivePresenceIn, request: Request):
                 "text": f"{name} bergabung ke live",
                 "ts": now.isoformat(),
             })
+            # Auto welcome greeting from the store, addressed to the viewer.
+            profil = await db.profil_admin.find_one({}, {"_id": 0, "live_welcome": 1, "nama_toko": 1}) or {}
+            template = (profil.get("live_welcome") or DEFAULT_LIVE_WELCOME).strip()
+            if template:
+                toko = profil.get("nama_toko") or "toko kami"
+                greeting = template.replace("{nama}", name).replace("{toko}", toko)
+                wseq = await _next_seq("msg_seq")
+                await db.live_messages.insert_one({
+                    "id": uuid.uuid4().hex[:12],
+                    "seq": wseq,
+                    "uid": "toko",
+                    "name": toko,
+                    "role": "admin",
+                    "kind": "welcome",
+                    "text": greeting[:300],
+                    "ts": now.isoformat(),
+                })
     return {"ok": True, "muted": viewer["uid"] in (state.get("muted") or []), "kicked": False}
 
 
@@ -1322,6 +1341,8 @@ async def update_profil(payload: ProfilUpdate, admin: dict = Depends(require_adm
     }
     if payload.kurir_list is not None:
         data["kurir_list"] = payload.kurir_list
+    if payload.live_welcome is not None:
+        data["live_welcome"] = payload.live_welcome.strip()
     await db.profil_admin.update_one({}, {"$set": data}, upsert=True)
     profil = await db.profil_admin.find_one({}, {"_id": 0})
     return profil
@@ -1890,6 +1911,7 @@ async def on_startup():
             ],
             "whatsapp": DEFAULT_WHATSAPP,
             "kurir_list": DEFAULT_KURIR,
+            "live_welcome": DEFAULT_LIVE_WELCOME,
         })
         logger.info("Seeded profil_admin")
     else:
@@ -1900,6 +1922,8 @@ async def on_startup():
             patch["whatsapp"] = DEFAULT_WHATSAPP
         if not (profil or {}).get("kurir_list"):
             patch["kurir_list"] = DEFAULT_KURIR
+        if not (profil or {}).get("live_welcome"):
+            patch["live_welcome"] = DEFAULT_LIVE_WELCOME
         if patch:
             await db.profil_admin.update_one({}, {"$set": patch})
 

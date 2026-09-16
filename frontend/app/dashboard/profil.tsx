@@ -22,6 +22,7 @@ type Profil = {
   banner_url?: string | null;
   rekening_bank: Rekening[];
   whatsapp: string;
+  live_welcome?: string;
 };
 
 export default function ProfilScreen() {
@@ -40,6 +41,7 @@ export default function ProfilScreen() {
   const [logo, setLogo] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [whatsapp, setWhatsapp] = useState("");
+  const [liveWelcome, setLiveWelcome] = useState("");
   const [rekening, setRekening] = useState<Rekening[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -53,6 +55,7 @@ export default function ProfilScreen() {
       setLogo(data.logo_url ?? null);
       setBanner(data.banner_url ?? null);
       setWhatsapp(data.whatsapp ?? "");
+      setLiveWelcome(data.live_welcome ?? "");
       setRekening(data.rekening_bank ?? []);
     }
   }, [data]);
@@ -140,6 +143,7 @@ export default function ProfilScreen() {
           banner_url: banner,
           whatsapp: whatsapp.trim(),
           rekening_bank: cleanRek,
+          live_welcome: liveWelcome.trim(),
         },
       });
       queryClient.invalidateQueries({ queryKey: ["profil_admin"] });
@@ -239,6 +243,21 @@ export default function ProfilScreen() {
         onChangeText={setWhatsapp}
         containerTestID="profil-whatsapp"
       />
+
+      <M3TextField
+        label="Sapaan Otomatis Live"
+        icon="hand-wave-outline"
+        placeholder="Halo {nama}, selamat datang di live {toko}! 🎉"
+        value={liveWelcome}
+        onChangeText={setLiveWelcome}
+        multiline
+        numberOfLines={3}
+        containerTestID="profil-live-welcome"
+        style={{ minHeight: 76, textAlignVertical: "top" }}
+      />
+      <Text style={styles.hint}>
+        Dikirim otomatis dari toko saat penonton baru gabung live. Gunakan {"{nama}"} untuk nama penonton & {"{toko}"} untuk nama toko.
+      </Text>
 
       {/* Rekening bank */}
       <View style={styles.rekHeader}>

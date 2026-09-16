@@ -350,7 +350,17 @@ Inter body. Language: Indonesian.
   ulang iter26: reaction tamu kini MUNCUL juga di layar host (live_react ke room live+admins).
 - Fix host visibility butuh APK BARU (build lama belum memuat perbaikan socket).
 
-## Implemented (2026-06 fork — Nama tamu live + transkrip chat + AI produk), iter28-29
+## Implemented (2026-06 fork — Riwayat versi foto AI + sapaan otomatis live), iter30
+- RIWAYAT AI (kembalikan foto): tiap slot foto di /product-form menyimpan riwayat versi
+  (`PhotoItem{versions[],idx}`). Enhance AI menambah versi baru; tombol undo/redo (↩/↪) di bawah
+  thumbnail untuk maju-mundur antar versi ("Asli"→v1→v2...). Yang tersimpan = versi aktif tiap foto.
+- SAPAAN OTOMATIS LIVE: saat penonton baru pertama gabung, selain pesan sistem "bergabung",
+  backend mengirim pesan chat dari toko (role=admin, name=nama_toko, kind=welcome) menyapa nama
+  penonton. Template `profil_admin.live_welcome` (default DEFAULT_LIVE_WELCOME), placeholder
+  {nama} & {toko}. Bisa diedit admin di Pengaturan Toko (field "Sapaan Otomatis Live").
+  ProfilUpdate + GET/PUT /api/profil_admin kini menyertakan live_welcome; seed + patch default.
+- Diverifikasi: backend (welcome default & custom template terpakai, {nama}/{toko} tersubstitusi),
+  frontend (field sapaan tampil di profil dengan default+hint; riwayat versi foto di form produk).
 - LIVE: penonton BARU (tanpa login) wajib buat nama tampilan dulu (gate "Siapa nama kamu?"
   di app/live.tsx, disimpan di AsyncStorage `diana_live_name`). User login pakai nama akun.
 - LIVE: tiap akun/tamu pertama kali join memunculkan pesan sistem "✨ <nama> bergabung ke live"

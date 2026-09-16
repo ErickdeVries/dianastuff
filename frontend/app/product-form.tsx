@@ -16,6 +16,10 @@ import { resolveImageUrl } from "@/src/utils/image";
 
 const MAX_PHOTOS = 5;
 
+// A photo slot keeps its full AI-edit history so the admin can step back/forward.
+type PhotoItem = { versions: string[]; idx: number };
+const cur = (p: PhotoItem) => p.versions[p.idx];
+
 type Product = {
   id: string;
   kategori: string;
@@ -50,7 +54,7 @@ export default function ProductForm() {
   const [stok, setStok] = useState("");
   const [berat, setBerat] = useState("");
   const [bisaPo, setBisaPo] = useState(false);
-  const [fotos, setFotos] = useState<string[]>([]);
+  const [fotos, setFotos] = useState<PhotoItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -66,7 +70,7 @@ export default function ProductForm() {
       setStok(String(data.stok ?? ""));
       setBerat(String(data.berat_gram ?? ""));
       setBisaPo(!!data.bisa_po);
-      setFotos(data.foto_urls ?? []);
+      setFotos((data.foto_urls ?? []).map((u) => ({ versions: [u], idx: 0 })));
     }
   }, [data]);
 
@@ -89,7 +93,8 @@ export default function ProductForm() {
         setError(res.error);
         return;
       }
-      if (res.urls.length) setFotos((p) => [...p, ...res.urls].slice(0, MAX_PHOTOS));
+      if (res.urls.length)
+        setFotos((p) => [...p, ...res.urls.map((u) => ({ versions: [u], idx: 0 }))].slice(0, MAX_PHOTOS));
     } finally {
       setUploading(false);
     }
@@ -105,7 +110,7 @@ export default function ProductForm() {
     try {
       const res = await apiRequest<{ nama_produk: string; deskripsi: string; kategori: string }>(
         "/api/admin/ai/product-info",
-        { method: "POST", body: { foto_url: fotos[0] } },
+        { method: "POST", body: { foto_url: cur(fotos[0]) } },
       );
       if (res.nama_produk) setNama(res.nama_produk);
       if (res.deskripsi) setDeskripsi(res.deskripsi);
@@ -123,14 +128,32 @@ export default function ProductForm() {
     try {
       const res = await apiRequest<{ url: string }>("/api/admin/ai/enhance-photo", {
         method: "POST",
-        body: { foto_url: fotos[index] },
+        body: { foto_url: cur(fotos[index]) },
       });
-      if (res.url) setFotos((p) => p.map((f, i) => (i === index ? res.url : f)));
+      if (res.url)
+        setFotos((p) =>
+          p.map((f, i) => {
+            if (i !== index) return f;
+            // append the new AI version after the current one, drop any "redo" branch
+            const versions = [...f.versions.slice(0, f.idx + 1), res.url];
+            return { versions, idx: versions.length - 1 };
+          }),
+        );
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Gagal mempercantik foto dengan AI.");
     } finally {
       setEnhancingIndex(null);
     }
+  };
+
+  const stepVersion = (index: number, delta: number) => {
+    setFotos((p) =>
+      p.map((f, i) => {
+        if (i !== index) return f;
+        const idx = Math.min(f.versions.length - 1, Math.max(0, f.idx + delta));
+        return { ...f, idx };
+      }),
+    );
   };
 
   const onSave = async () => {
@@ -149,7 +172,7 @@ export default function ProductForm() {
         stok: parseInt(stok, 10) || 0,
         berat_gram: parseInt(berat, 10) || 0,
         bisa_po: bisaPo,
-        foto_urls: fotos,
+        foto_urls: fotos.map((f) => cur(f)),
       };
       if (isEdit) {
         await apiRequest(`/api/products/${id}`, { method: "PUT", body });
@@ -183,19 +206,44 @@ export default function ProductForm() {
         <Text style={styles.label}>Foto Produk ({fotos.length}/{MAX_PHOTOS})</Text>
         <View style={styles.photoRow}>
           {fotos.map((f, i) => (
-            <View key={i} style={styles.photoWrap} testID={`product-photo-${i}`}>
-              <Image source={{ uri: resolveImageUrl(f) }} style={styles.photo} contentFit="cover" />
-              <Pressable testID={`remove-photo-${i}`} style={styles.removePhoto} onPress={() => setFotos((p) => p.filter((_, idx) => idx !== i))}>
-                <MaterialDesignIcons name="close" size={14} color={colors.onError} />
-              </Pressable>
-              <Pressable
-                testID={`enhance-photo-${i}`}
-                style={styles.enhanceBtn}
-                disabled={enhancingIndex !== null}
-                onPress={() => enhancePhoto(i)}
-              >
-                <MaterialDesignIcons name={enhancingIndex === i ? "loading" : "auto-fix"} size={14} color="#fff" />
-              </Pressable>
+            <View key={i} style={styles.photoCol} testID={`product-photo-${i}`}>
+              <View style={styles.photoWrap}>
+                <Image source={{ uri: resolveImageUrl(cur(f)) }} style={styles.photo} contentFit="cover" />
+                <Pressable testID={`remove-photo-${i}`} style={styles.removePhoto} onPress={() => setFotos((p) => p.filter((_, idx) => idx !== i))}>
+                  <MaterialDesignIcons name="close" size={14} color={colors.onError} />
+                </Pressable>
+                <Pressable
+                  testID={`enhance-photo-${i}`}
+                  style={styles.enhanceBtn}
+                  disabled={enhancingIndex !== null}
+                  onPress={() => enhancePhoto(i)}
+                >
+                  <MaterialDesignIcons name={enhancingIndex === i ? "loading" : "auto-fix"} size={14} color="#fff" />
+                </Pressable>
+              </View>
+              {f.versions.length > 1 ? (
+                <View style={styles.verRow}>
+                  <Pressable
+                    testID={`ver-prev-${i}`}
+                    disabled={f.idx === 0}
+                    onPress={() => stepVersion(i, -1)}
+                    style={[styles.verBtn, f.idx === 0 && styles.verBtnOff]}
+                    hitSlop={6}
+                  >
+                    <MaterialDesignIcons name="undo-variant" size={13} color={f.idx === 0 ? colors.muted : colors.brandPrimary} />
+                  </Pressable>
+                  <Text style={styles.verText}>{f.idx === 0 ? "Asli" : `v${f.idx}`}</Text>
+                  <Pressable
+                    testID={`ver-next-${i}`}
+                    disabled={f.idx >= f.versions.length - 1}
+                    onPress={() => stepVersion(i, 1)}
+                    style={[styles.verBtn, f.idx >= f.versions.length - 1 && styles.verBtnOff]}
+                    hitSlop={6}
+                  >
+                    <MaterialDesignIcons name="redo-variant" size={13} color={f.idx >= f.versions.length - 1 ? colors.muted : colors.brandPrimary} />
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
           ))}
           {fotos.length < MAX_PHOTOS ? (
@@ -279,6 +327,7 @@ const useStyles = makeStyles((colors) => ({
   content: { paddingHorizontal: 20, paddingTop: 8, gap: 14 },
   label: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onSurface },
   photoRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  photoCol: { alignItems: "center", gap: 4 },
   photoWrap: { width: 76, height: 76 },
   photo: { width: 76, height: 76, borderRadius: 14, backgroundColor: colors.surfaceTertiary },
   removePhoto: {
@@ -316,6 +365,10 @@ const useStyles = makeStyles((colors) => ({
   aiBtnDisabled: { opacity: 0.5 },
   aiBtnText: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onBrandPrimary },
   aiHint: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, marginTop: -6 },
+  verRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  verBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
+  verBtnOff: { opacity: 0.4 },
+  verText: { fontFamily: fonts.bodyMedium, fontSize: 10, color: colors.muted, minWidth: 22, textAlign: "center" },
   addPhoto: {
     width: 76,
     height: 76,
