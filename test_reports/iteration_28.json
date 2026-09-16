@@ -1,0 +1,51 @@
+{
+  "summary": "Iter28 verified all three new live features end-to-end. BACKEND 7/8 pytest PASS (test_live_guest_name_transcript_iter28.py): (1) join announcement — new guest viewer_id presence inserts role='system' kind='join' message '<name> bergabung ke live' in feed; 3x repeated presence with same viewer_id produced exactly 1 join message (no dup); (2) session isolation — session A's chat did NOT leak into session B's feed (await _reset_live_state fix works); (3) transcript — after live/stop, GET /api/admin/live-history/{id}/chat returns {title, messages} containing join system messages + all chats, no _id leak, requires admin (401/403 without), 404 for unknown id, DELETE recap still works and transcript 404s after delete. FRONTEND 3/3 flows PASS via mobile Playwright (375x667): GUEST — cleared localStorage, gate 'Siapa nama kamu?' shown with 'Gabung Live' disabled (aria-disabled=true) until name typed; entered 'Sinta' -> joined, join pill '✨ Sinta bergabung ke live' rendered, chat prefixed 'Sinta: ...', featured bar + LIVE badge + viewer pill + reactions all working, reload remembered name (no gate); BUYER (buyer/buyer123) — no gate, join announcement used account name 'Pembeli Demo', chat prefixed with account name; ADMIN — /dashboard/live-rekap recap card 'Lihat Chat Live' opens bottom-sheet modal with italic system join lines and 'name: text' + time rows (verified font-style=italic), close button works. /live-host loads fine (camera black on web expected, Agora native-only — not flagged). ONE FAILURE: logged-in buyer presence with a spoofed client-supplied name used that name in the join message instead of the account name (backend bug).",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/live/presence (+ POST /api/live/chat)", "issue": "Name spoofing: for AUTHENTICATED users the backend prefers payload.name over the account name — server.py L862 `name = ((payload.name or viewer['name'])...)` (and L828 for chat). A logged-in user can send any name (e.g. 'admin') and it appears in the join announcement and chat, enabling impersonation. For authenticated viewers, payload.name should be ignored and viewer['name'] (account name) used. Failing test: TestJoinAnnouncement::test_logged_in_buyer_join_uses_account_name. Reference: /app/backend/server.py:828,862", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/live/presence", "issue": "Check-then-insert join dedup is not atomic (find_one then upsert+insert). Two concurrent first-presence calls for the same viewer_id could both insert a join message. Low risk (single client heartbeats sequentially) but a unique partial index or upsert-result check would make it race-proof. Reference: /app/backend/server.py:863-883"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "textShadow", "issue": "Carried over from iter27: RN-Web deprecation warnings for textShadow* style props (live.tsx title/caption styles). Non-blocking. Reference: /app/frontend/app/live.tsx:417-418"}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_live_guest_name_transcript_iter28.py",
+    "/app/test_reports/pytest/pytest_iter28_guest_transcript.xml",
+    "/app/test_reports/screenshots/iter28_guest_joined.jpeg",
+    "/app/test_reports/screenshots/iter28_guest_rani.jpeg",
+    "/app/test_reports/screenshots/iter28_buyer_live.jpeg",
+    "/app/test_reports/screenshots/iter28_admin_transcript_modal.jpeg",
+    "/app/test_reports/screenshots/iter28_live_host.jpeg"
+  ],
+  "action_items": [
+    "FIX (HIGH): In server.py live presence (L862) and chat (L828), when the request is authenticated (viewer from token), ignore payload.name and always use the account name so join announcements/chat cannot be spoofed. Guests still use payload.name.",
+    "OPTIONAL: make join-announcement dedup race-safe (check upsert result / matched_count instead of separate find_one).",
+    "NOTE: DOM probe confirmed exactly 1 join pill per viewer (backend feed also had exactly 1 join message) — earlier screenshot's apparent double pill was two different viewers' joins in the shared chat column."
+  ],
+  "critical_code_review_comments": [
+    "server.py L720-724: chat_log snapshot taken BEFORE _reset_live_state wipes live_messages — ordering correct; transcript capped at 500 msgs (reasonable).",
+    "server.py L869-883: join announce only when presence doc did not exist AND a live show is active — correct; repeated heartbeats upsert without re-announcing (verified 3x -> 1 msg).",
+    "server.py L670 + L728: _reset_live_state now awaited in both start and stop — session isolation verified empirically (session A chat absent from session B feed).",
+    "live.tsx L165-193: guest gate renders only when live active && !user && !guestName; join button disabled until non-empty trim; name persisted via storage (survives reload, verified). Logged-in users bypass gate with account name (verified 'Pembeli Demo').",
+    "live-rekap.tsx L105-140: transcript modal uses nested Pressable to prevent backdrop-close when tapping content; join lines italic via styles.chatJoin (computed font-style=italic verified); time via toLocaleTimeString id-ID.",
+    "useLivePoll.ts: effect cleanup calls leaveLive (presence delete) on unmount — on screen exit the viewer is removed, so re-entering /live re-announces the join. Acceptable UX, but note it means leave->rejoin within one live shows a second join pill for the same viewer (by design, matches 'when each account joins')."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_live_guest_name_transcript_iter28.py (new, 8 tests)",
+    "/app/test_reports/iteration_28.json"
+  ],
+  "success_rate": {"backend": "87.5% (7/8 pytest; 1 failure = name spoofing bug)", "frontend": "100% (guest gate+join+chat+reload, buyer no-gate+account-name join, admin transcript modal open/close, host screen load)"},
+  "seed_data_creation": "Temporary lives TEST_iter28_* started/stopped during tests. Cleanup: all TEST_iter28 recaps deleted EXCEPT one kept for user visibility: live_82b5c13606d6 'TEST_iter28_ui_guest' whose transcript demonstrates the feature (Sinta/Rani/Pembeli Demo joins + chats). Final state: no live running.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter28 features verified except ONE backend bug: authenticated users can spoof display name via payload.name in /api/live/presence and /api/live/chat (server.py L828, L862) — fix by preferring viewer['name'] when request is authenticated, then re-run tests/test_live_guest_name_transcript_iter28.py::TestJoinAnnouncement::test_logged_in_buyer_join_uses_account_name. Run pytest with EXPO_PUBLIC_BACKEND_URL exported from frontend/.env and '-o addopts=' (root pytest.ini enables xdist; single-live state is shared). Kept recap live_82b5c13606d6 intentionally for the user. Guest name stored under localStorage key diana_live_name; viewer id under diana_live_viewer_id. Buyer account name = 'Pembeli Demo'.",
+  "rca_of_issue": "BUG: join announcement/chat name spoofing for logged-in users. REPRO: login as buyer (buyer/buyer123) -> POST /api/live/presence with Authorization header and body {viewer_id:'x', name:'ShouldBeIgnored'} while a live is active -> GET /api/live/feed shows system message 'ShouldBeIgnored bergabung ke live' instead of 'Pembeli Demo bergabung ke live'. ROOT CAUSE: server.py live_presence_post L862 and live_chat_post L828 compute display name as `payload.name or viewer['name']`, trusting client input even when the viewer identity comes from a verified session token. MITIGATION: when _live_viewer resolved an authenticated user (role != guest / uid not prefixed guest_), ignore payload.name and use viewer['name']; keep payload.name only for guests. Frontend unaffected (it already sends the account name)."
+}

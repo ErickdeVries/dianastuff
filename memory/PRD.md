@@ -350,6 +350,32 @@ Inter body. Language: Indonesian.
   ulang iter26: reaction tamu kini MUNCUL juga di layar host (live_react ke room live+admins).
 - Fix host visibility butuh APK BARU (build lama belum memuat perbaikan socket).
 
+## Implemented (2026-06 fork — Nama tamu live + transkrip chat + AI produk), iter28-29
+- LIVE: penonton BARU (tanpa login) wajib buat nama tampilan dulu (gate "Siapa nama kamu?"
+  di app/live.tsx, disimpan di AsyncStorage `diana_live_name`). User login pakai nama akun.
+- LIVE: tiap akun/tamu pertama kali join memunculkan pesan sistem "✨ <nama> bergabung ke live"
+  di kolom chat (POST /api/live/presence insert 1x per uid, tidak duplikat saat heartbeat ulang).
+  Render pesan role=system sebagai pill di viewer & host.
+- LIVE: transkrip chat tiap sesi disimpan (live/stop snapshot semua live_messages ke
+  live_shows.chat_log). Endpoint GET /api/admin/live-history/{id}/chat. Rekap admin
+  (/dashboard/live-rekap) tiap kartu punya tombol "Lihat Chat Live" -> modal transkrip.
+- FIX (anti-spoof, HIGH): user login TIDAK bisa menyamar nama lain di live chat/presence —
+  backend pakai nama akun untuk non-guest; hanya tamu boleh pilih nama. (server.py ~815-895)
+- FIX: `_reset_live_state()` kini di-`await` di live/start & live/stop (sebelumnya pesan sesi
+  lama bocor ke sesi baru).
+- AI PRODUK (Emergent Universal Key): form admin /product-form.
+  - Tombol "✨ Isi Nama, Deskripsi & Kategori (AI)" -> POST /api/admin/ai/product-info {foto_url}
+    membaca foto pertama via Gemini vision (gemini-3-flash-preview), balikan JSON
+    nama_produk/deskripsi/kategori (Bahasa Indonesia menjual). Disable jika belum ada foto.
+  - Ikon ✨ di tiap thumbnail foto -> POST /api/admin/ai/enhance-photo {foto_url} mengedit foto
+    jadi foto iklan layak display (Gemini Nano Banana gemini-3.1-flash-image-preview: background
+    studio netral, cahaya rata), hasil disimpan ke Object Storage & mengganti thumbnail.
+  - Helper backend `_load_image_b64` (baca dari Object Storage path atau URL). EMERGENT_LLM_KEY
+    sudah di backend/.env. Playbook test disimpan di /app/image_testing.md.
+- Diverifikasi iter28 (7/8 + FE) & iter29 (10/10 pytest + FE): AI text & enhance, anti-spoof,
+  gate nama, transkrip, regresi produk & live semua lolos.
+- web.zip di-rebuild (backend produksi + fitur live REST terbaru) di /api/download/web.zip.
+
 ## Implemented (2026-06 fork — Live realtime migrasi ke MongoDB + REST polling), iter27
 - MASALAH: produksi jalan multi-worker → state Socket.io in-memory (LIVE_STATS/LIVE_CHAT_BUFFER/
   LIVE_VIEWERS/LIVE_PINNED/LIVE_MUTED/LIVE_KICKED) terpecah antar worker → chat penonton web tidak

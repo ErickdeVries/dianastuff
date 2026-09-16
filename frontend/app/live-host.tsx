@@ -247,7 +247,12 @@ export default function LiveHostScreen() {
           ref={chatRef}
           data={chat}
           keyExtractor={(m) => m.id}
-          renderItem={({ item }) => (
+          renderItem={({ item }) =>
+            item.role === "system" ? (
+              <View style={styles.joinBubble}>
+                <Text style={styles.joinText}>✨ {item.text}</Text>
+              </View>
+            ) : (
             <Pressable
               testID={`host-msg-${item.id}`}
               style={styles.chatBubble}
@@ -258,7 +263,8 @@ export default function LiveHostScreen() {
                 <Text style={styles.chatText}>{item.text}</Text>
               </Text>
             </Pressable>
-          )}
+            )
+          }
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ gap: 4, paddingTop: 8 }}
         />
@@ -397,6 +403,8 @@ const useStyles = makeStyles((colors) => ({
   chatBubble: { alignSelf: "flex-start", backgroundColor: "rgba(0,0,0,0.4)", borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, maxWidth: "100%" },
   chatName: { fontFamily: fonts.bodyMedium, fontSize: 13, color: "#FFD9F3" },
   chatText: { fontFamily: fonts.body, fontSize: 13, color: "#fff" },
+  joinBubble: { alignSelf: "center", backgroundColor: "rgba(168,85,247,0.25)", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
+  joinText: { fontFamily: fonts.body, fontSize: 11, color: "rgba(255,255,255,0.85)", fontStyle: "italic" },
 
   inputBar: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingTop: 10, backgroundColor: "rgba(0,0,0,0.55)" },
   input: { flex: 1, fontFamily: fonts.body, fontSize: 15, color: "#fff", backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10 },

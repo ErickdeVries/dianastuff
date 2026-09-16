@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="8" time="9.648" timestamp="2026-09-16T13:44:16.548643+00:00" hostname="agent-env-1b8f227e-6344-4804-93be-8d6f7db5a780"><testcase classname="tests.test_live_guest_name_transcript_iter28.TestJoinAnnouncement" name="test_new_guest_join_inserts_system_message" time="1.481" /><testcase classname="tests.test_live_guest_name_transcript_iter28.TestJoinAnnouncement" name="test_repeated_presence_same_viewer_does_not_duplicate" time="1.082" /><testcase classname="tests.test_live_guest_name_transcript_iter28.TestJoinAnnouncement" name="test_logged_in_buyer_join_uses_account_name" time="1.282"><failure message="AssertionError: buyer join message used client-supplied name instead of account name&#10;assert not True&#10; +  where True = any(&lt;generator object TestJoinAnnouncement.test_logged_in_buyer_join_uses_account_name.&lt;locals&gt;.&lt;genexpr&gt; at 0xfda6059c9ee0&gt;)">self = &lt;test_live_guest_name_transcript_iter28.TestJoinAnnouncement object at 0xfda6059af890&gt;
+live_session = {'live': True, 'channel': 'dianastuff_live', 'title': 'TEST_iter28_guest_transcript', 'caption': 'iter28', ...}
+buyer_token = 'D-lahnfYxZuICd5MVGU_SMA0hAoY7cgIhpuyo1zZcik'
+
+    def test_logged_in_buyer_join_uses_account_name(self, live_session, buyer_token):
+        headers = {"Authorization": f"Bearer {buyer_token}", "Content-Type": "application/json"}
+        r = _presence("iter28c_buyer", "ShouldBeIgnored", headers=headers)
+        assert r.status_code == 200
+    
+        feed = _feed("iter28c_buyer", headers=headers).json()
+        joins = [m for m in feed.get("messages", []) if m.get("role") == "system"]
+        assert joins, "no join message for logged-in buyer"
+        # name must come from the account, not the client-supplied name
+&gt;       assert not any("ShouldBeIgnored" in m["text"] for m in joins), \
+            "buyer join message used client-supplied name instead of account name"
+E       AssertionError: buyer join message used client-supplied name instead of account name
+E       assert not True
+E        +  where True = any(&lt;generator object TestJoinAnnouncement.test_logged_in_buyer_join_uses_account_name.&lt;locals&gt;.&lt;genexpr&gt; at 0xfda6059c9ee0&gt;)
+
+tests/test_live_guest_name_transcript_iter28.py:150: AssertionError</failure></testcase><testcase classname="tests.test_live_guest_name_transcript_iter28.TestSessionIsolation" name="test_previous_session_messages_do_not_leak" time="1.388" /><testcase classname="tests.test_live_guest_name_transcript_iter28.TestTranscript" name="test_transcript_saved_with_join_and_chat_messages" time="1.355" /><testcase classname="tests.test_live_guest_name_transcript_iter28.TestTranscript" name="test_transcript_requires_admin_auth" time="0.510" /><testcase classname="tests.test_live_guest_name_transcript_iter28.TestTranscript" name="test_transcript_unknown_show_404" time="0.151" /><testcase classname="tests.test_live_guest_name_transcript_iter28.TestTranscript" name="test_delete_recap_still_works" time="2.330" /></testsuite></testsuites>

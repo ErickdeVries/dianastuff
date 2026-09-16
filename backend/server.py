@@ -11,6 +11,8 @@ import re
 import time
 import uuid
 import secrets
+import base64
+import json
 import bcrypt
 import httpx
 import requests
@@ -490,6 +492,140 @@ async def serve_file(path: str):
     return Response(content=content, media_type=content_type, headers={"Cache-Control": "public, max-age=86400"})
 
 
+# ---------------------------------------------------------------------------
+# AI helpers (Emergent Universal LLM key) — auto product info + photo enhance
+# ---------------------------------------------------------------------------
+def _storage_path_from_url(foto_url: str) -> Optional[str]:
+    """Resolve an app photo reference to its object-storage path."""
+    if not foto_url:
+        return None
+    marker = "/api/files/"
+    if marker in foto_url:
+        return foto_url.split(marker, 1)[1]
+    if foto_url.startswith("http://") or foto_url.startswith("https://"):
+        return None
+    return foto_url.lstrip("/")
+
+
+def _load_image_b64(foto_url: str) -> tuple[str, str]:
+    """Return (base64_str, mime) for a product photo (storage path or http url)."""
+    path = _storage_path_from_url(foto_url)
+    if path:
+        content, mime = get_object(path)
+    else:
+        resp = requests.get(foto_url, timeout=60)
+        resp.raise_for_status()
+        content, mime = resp.content, resp.headers.get("Content-Type", "image/jpeg")
+    if not mime or not mime.startswith("image/"):
+        mime = "image/jpeg"
+    return base64.b64encode(content).decode("utf-8"), mime
+
+
+class AiPhotoIn(BaseModel):
+    foto_url: str
+
+
+@api_router.post("/admin/ai/product-info")
+async def ai_product_info(payload: AiPhotoIn, admin: dict = Depends(require_admin)):
+    if not EMERGENT_KEY:
+        raise HTTPException(status_code=503, detail="AI belum dikonfigurasi")
+    try:
+        b64, _mime = await run_in_threadpool(_load_image_b64, payload.foto_url)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Foto tidak dapat dibaca")
+
+    from emergentintegrations.llm.chat import ImageContent, LlmChat, StreamDone, TextDelta, UserMessage
+
+    chat = LlmChat(
+        api_key=EMERGENT_KEY,
+        session_id=f"prodinfo_{uuid.uuid4().hex[:8]}",
+        system_message=(
+            "Anda asisten katalog toko online fashion di Indonesia. Lihat foto produk lalu buat "
+            "data produk dalam Bahasa Indonesia yang menjual. Balas HANYA JSON valid (tanpa teks "
+            "lain, tanpa markdown) dengan kunci persis: nama_produk (singkat & menarik, maks 8 kata), "
+            "deskripsi (2-4 kalimat, sebut bahan/warna/model/kegunaan jika terlihat), kategori "
+            "(satu kata/frasa singkat mis. Baju, Tas, Sepatu, Aksesoris, Celana). Jangan mengarang harga."
+        ),
+    ).with_model("gemini", "gemini-3-flash-preview")
+
+    msg = UserMessage(
+        text="Buatkan nama_produk, deskripsi, dan kategori untuk produk pada foto ini. Balas JSON saja.",
+        file_contents=[ImageContent(image_base64=b64)],
+    )
+    buf = ""
+    try:
+        async for ev in chat.stream_message(msg):
+            if isinstance(ev, TextDelta):
+                buf += ev.content
+            elif isinstance(ev, StreamDone):
+                break
+    except Exception as e:
+        logger.error(f"AI product-info error: {e}")
+        raise HTTPException(status_code=502, detail="Gagal membuat data AI")
+
+    raw = buf.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.DOTALL)
+    try:
+        data = json.loads(raw)
+    except Exception:
+        m = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+        data = json.loads(m.group(0)) if m else {}
+    return {
+        "nama_produk": (data.get("nama_produk") or "").strip()[:120],
+        "deskripsi": (data.get("deskripsi") or "").strip()[:1500],
+        "kategori": (data.get("kategori") or "").strip()[:60],
+    }
+
+
+@api_router.post("/admin/ai/enhance-photo")
+async def ai_enhance_photo(payload: AiPhotoIn, admin: dict = Depends(require_admin)):
+    if not EMERGENT_KEY:
+        raise HTTPException(status_code=503, detail="AI belum dikonfigurasi")
+    try:
+        b64, _mime = await run_in_threadpool(_load_image_b64, payload.foto_url)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Foto tidak dapat dibaca")
+
+    from emergentintegrations.llm.chat import ImageContent, LlmChat, UserMessage
+
+    chat = LlmChat(
+        api_key=EMERGENT_KEY,
+        session_id=f"enhance_{uuid.uuid4().hex[:8]}",
+        system_message="You are a professional e-commerce product photo retoucher.",
+    ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
+
+    prompt = (
+        "Edit this product photo into a clean, professional e-commerce advertising photo suitable "
+        "for an online shop listing. Place the product on a soft, neutral studio background with "
+        "bright, even lighting and a subtle natural shadow. Remove clutter and any distracting "
+        "background. Keep the product itself EXACTLY the same (same shape, color, texture, logo) and "
+        "centered. Square framing, high quality, realistic."
+    )
+    msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=b64)])
+    try:
+        _text, images = await chat.send_message_multimodal_response(msg)
+    except Exception as e:
+        logger.error(f"AI enhance error: {e}")
+        raise HTTPException(status_code=502, detail="Gagal memproses foto dengan AI")
+    if not images:
+        raise HTTPException(status_code=502, detail="AI tidak menghasilkan foto")
+
+    img = images[0]
+    out_bytes = base64.b64decode(img["data"])
+    out_mime = img.get("mime_type") or "image/png"
+    ext = "png" if "png" in out_mime else "jpg"
+    out_path = f"{APP_NAME}/uploads/{admin['user_id']}/ai_{uuid.uuid4().hex}.{ext}"
+    try:
+        await run_in_threadpool(put_object, out_path, out_bytes, out_mime)
+    except requests.HTTPError as e:
+        status = e.response.status_code if e.response is not None else 500
+        if status == 402:
+            raise HTTPException(status_code=402, detail="Kuota penyimpanan habis")
+        raise HTTPException(status_code=502, detail="Gagal menyimpan foto AI")
+    return {"path": out_path, "url": f"/api/files/{out_path}"}
+
+
 @api_router.api_route("/download/web.zip", methods=["GET", "HEAD"])
 async def download_web_bundle():
     zip_path = ROOT_DIR / "static_downloads" / "web.zip"
@@ -667,7 +803,7 @@ async def live_start(payload: LiveStart, admin: dict = Depends(require_admin)):
         "started_at": datetime.now(timezone.utc),
     }
     await db.live_shows.insert_one(show)
-    _reset_live_state()
+    await _reset_live_state()
     doc = await db.live_shows.find_one({"id": show["id"]}, {"_id": 0})
     await sio.emit("live_status", {"live": True, "channel": LIVE_CHANNEL})
     return {"live": True, **(await live_public(doc))}
@@ -717,13 +853,15 @@ async def live_stop(admin: dict = Depends(require_admin)):
     if show:
         show["ended_at"] = ended_at
         recap = await _build_recap(show)
+        # Snapshot the live chat transcript so admin can review it afterwards.
+        chat_log = await db.live_messages.find({}, {"_id": 0}).sort("seq", 1).to_list(500)
         await db.live_shows.update_one(
             {"id": show["id"]},
-            {"$set": {"status": "ended", "ended_at": ended_at, "recap": recap}},
+            {"$set": {"status": "ended", "ended_at": ended_at, "recap": recap, "chat_log": chat_log}},
         )
     else:
         await db.live_shows.update_many({"status": "live"}, {"$set": {"status": "ended", "ended_at": ended_at}})
-    _reset_live_state()
+    await _reset_live_state()
     await sio.emit("live_status", {"live": False})
     await sio.emit("live_viewers", {"count": 0, "viewers": []}, room=["live", "admins"])
     return {"live": False}
@@ -750,6 +888,14 @@ async def delete_live_history(show_id: str, admin: dict = Depends(require_admin)
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Rekap tidak ditemukan")
     return {"ok": True}
+
+
+@api_router.get("/admin/live-history/{show_id}/chat")
+async def live_history_chat(show_id: str, admin: dict = Depends(require_admin)):
+    doc = await db.live_shows.find_one({"id": show_id}, {"_id": 0, "title": 1, "chat_log": 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Rekap tidak ditemukan")
+    return {"title": doc.get("title", "Live Shopping"), "messages": doc.get("chat_log") or []}
 
 
 # ---- Live shopping realtime via MongoDB + REST polling (multi-worker safe) ----
@@ -815,7 +961,12 @@ async def live_chat_post(payload: LiveChatIn, request: Request):
     text = (payload.text or "").strip()[:300]
     if not text:
         return {"ok": False}
-    name = ((payload.name or viewer["name"]) or "Tamu").strip()[:40] or "Tamu"
+    # Anti-spoofing: authenticated users always chat under their account name;
+    # only guests may pick a display name.
+    if viewer["role"] != "guest":
+        name = viewer["name"]
+    else:
+        name = ((payload.name or viewer["name"]) or "Tamu").strip()[:40] or "Tamu"
     seq = await _next_seq("msg_seq")
     msg = {
         "id": uuid.uuid4().hex[:12],
@@ -845,15 +996,37 @@ async def live_react_post(payload: LiveReactIn):
 @api_router.post("/live/presence")
 async def live_presence_post(payload: LivePresenceIn, request: Request):
     viewer = await _live_viewer(request, payload.viewer_id)
+    state = await _live_state()
+    if viewer["uid"] in (state.get("kicked") or []):
+        return {"ok": True, "muted": False, "kicked": True}
     now = datetime.now(timezone.utc)
-    name = ((payload.name or viewer["name"]) or "Tamu").strip()[:40] or "Tamu"
+    # Anti-spoofing: authenticated users always appear under their account name.
+    if viewer["role"] != "guest":
+        name = viewer["name"]
+    else:
+        name = ((payload.name or viewer["name"]) or "Tamu").strip()[:40] or "Tamu"
+    existing = await db.live_presence.find_one({"uid": viewer["uid"]}, {"_id": 1})
     await db.live_presence.update_one(
         {"uid": viewer["uid"]},
         {"$set": {"uid": viewer["uid"], "user_id": viewer["user_id"], "name": name, "role": viewer["role"], "last_seen": now}},
         upsert=True,
     )
-    state = await _live_state()
-    return {"ok": True, "muted": viewer["uid"] in (state.get("muted") or []), "kicked": viewer["uid"] in (state.get("kicked") or [])}
+    if not existing:
+        # First join this session -> announce in the live chat column.
+        show = await db.live_shows.find_one({"status": "live"}, {"_id": 1})
+        if show:
+            seq = await _next_seq("msg_seq")
+            await db.live_messages.insert_one({
+                "id": uuid.uuid4().hex[:12],
+                "seq": seq,
+                "uid": viewer["uid"],
+                "name": name,
+                "role": "system",
+                "kind": "join",
+                "text": f"{name} bergabung ke live",
+                "ts": now.isoformat(),
+            })
+    return {"ok": True, "muted": viewer["uid"] in (state.get("muted") or []), "kicked": False}
 
 
 @api_router.post("/live/leave")

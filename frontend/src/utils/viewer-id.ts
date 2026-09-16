@@ -23,3 +23,15 @@ export async function getViewerId(): Promise<string> {
   await storage.setItem(VIEWER_ID_KEY, fresh);
   return fresh;
 }
+
+// ---- Guest display name for live chat (no login required) ----
+const GUEST_NAME_KEY = "diana_live_name";
+
+export async function getGuestName(): Promise<string | null> {
+  const stored = await storage.getItem<string | null>(GUEST_NAME_KEY, null);
+  return stored && stored.trim() ? stored.trim() : null;
+}
+
+export async function setGuestName(name: string): Promise<void> {
+  await storage.setItem(GUEST_NAME_KEY, name.trim());
+}

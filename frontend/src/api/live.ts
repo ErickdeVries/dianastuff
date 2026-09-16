@@ -176,3 +176,9 @@ export function muteLiveViewer(uid: string, mute: boolean): Promise<{ ok: boolea
 export function kickLiveViewer(uid: string): Promise<{ ok: boolean }> {
   return apiRequest("/api/live/kick", { method: "POST", body: { uid, mute: false } });
 }
+
+export type LiveChatHistory = { title?: string; messages: LiveFeedMsg[] };
+
+export function getLiveChatHistory(id: string): Promise<LiveChatHistory> {
+  return apiRequest<LiveChatHistory>(`/api/admin/live-history/${id}/chat`);
+}

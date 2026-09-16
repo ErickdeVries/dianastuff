@@ -16,6 +16,7 @@ import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { formatRupiah } from "@/src/utils/format";
 import { resolveImageUrl } from "@/src/utils/image";
 import { PUBLIC_WEB_URL } from "@/src/utils/links";
+import { getGuestName, setGuestName } from "@/src/utils/viewer-id";
 
 const REACTIONS = ["❤️", "🔥", "😍", "👍", "👏", "😮"];
 
@@ -40,10 +41,33 @@ export default function LiveViewerScreen() {
   });
 
   const [text, setText] = useState("");
+  const [guestName, setGuestNameState] = useState<string | null>(null);
+  const [nameLoaded, setNameLoaded] = useState(false);
+  const [nameInput, setNameInput] = useState("");
   const chatRef = useRef<FlatList<LiveFeedMsg>>(null);
+
+  // Guests must pick a display name before joining (no login required).
+  useEffect(() => {
+    if (user) {
+      setNameLoaded(true);
+      return;
+    }
+    let alive = true;
+    getGuestName().then((n) => {
+      if (alive) {
+        setGuestNameState(n);
+        setNameLoaded(true);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [user]);
 
   const gated = !!data?.require_login && !user;
   const active = !!data?.live && !gated;
+  const needsName = !user && !guestName;
+  const myName = user?.nama || guestName || undefined;
 
   const {
     chat,
@@ -56,7 +80,7 @@ export default function LiveViewerScreen() {
     kicked,
     featured: featuredLive,
     getVid,
-  } = useLivePoll({ enabled: active, registerPresence: true, name: user?.nama || undefined });
+  } = useLivePoll({ enabled: active && !needsName, registerPresence: true, name: myName });
 
   const viewerCount = viewers.count;
   const featured = featuredLive !== undefined ? featuredLive : data?.featured ?? null;
@@ -65,12 +89,19 @@ export default function LiveViewerScreen() {
     if (chat.length) setTimeout(() => chatRef.current?.scrollToEnd({ animated: true }), 80);
   }, [chat.length]);
 
+  const submitName = async () => {
+    const n = nameInput.trim().slice(0, 24);
+    if (!n) return;
+    await setGuestName(n);
+    setGuestNameState(n);
+  };
+
   const sendChat = async () => {
     const t = text.trim();
     if (!t) return;
     setText("");
     const vid = await getVid();
-    sendLiveChat({ viewerId: vid, name: user?.nama || undefined, text: t }).catch(() => {});
+    sendLiveChat({ viewerId: vid, name: myName, text: t }).catch(() => {});
   };
 
   const sendReaction = async (emoji: string) => {
@@ -125,6 +156,37 @@ export default function LiveViewerScreen() {
         <Text style={styles.offSub}>Siaran ini khusus untuk pengguna terdaftar.</Text>
         <Pressable testID="live-login" style={styles.backToShop} onPress={() => router.push("/login")}>
           <Text style={styles.backToShopText}>Masuk / Daftar</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // Guest must create a display name first (no login required).
+  if (active && needsName) {
+    if (!nameLoaded) return <View style={[styles.root, { backgroundColor: colors.surface }]} />;
+    return (
+      <View style={[styles.root, styles.center]}>
+        <MaterialDesignIcons name="account-edit-outline" size={56} color={colors.brandPrimary} />
+        <Text style={styles.offTitle}>Siapa nama kamu?</Text>
+        <Text style={styles.offSub}>Buat nama tampilan dulu ya, biar host & penonton lain bisa membedakanmu di chat live.</Text>
+        <TextInput
+          testID="live-name-input"
+          style={styles.nameInput}
+          placeholder="Contoh: Rina"
+          placeholderTextColor={colors.muted}
+          value={nameInput}
+          onChangeText={setNameInput}
+          maxLength={24}
+          onSubmitEditing={submitName}
+          returnKeyType="done"
+        />
+        <Pressable
+          testID="live-name-join"
+          style={[styles.backToShop, !nameInput.trim() && { opacity: 0.5 }]}
+          disabled={!nameInput.trim()}
+          onPress={submitName}
+        >
+          <Text style={styles.backToShopText}>Gabung Live</Text>
         </Pressable>
       </View>
     );
@@ -233,14 +295,20 @@ export default function LiveViewerScreen() {
             data={chat}
             keyExtractor={(m) => m.id}
             style={styles.chatList}
-            renderItem={({ item }) => (
+            renderItem={({ item }) =>
+              item.role === "system" ? (
+                <View style={styles.joinBubble}>
+                  <Text style={styles.joinText}>✨ {item.text}</Text>
+                </View>
+              ) : (
               <View style={styles.chatBubble}>
                 <Text style={styles.chatName}>
                   {item.role === "admin" ? "👑 " : ""}{item.name}:{" "}
                   <Text style={styles.chatText}>{item.text}</Text>
                 </Text>
               </View>
-            )}
+              )
+            }
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ gap: 4, paddingTop: 8 }}
           />
@@ -331,6 +399,7 @@ const useStyles = makeStyles((colors) => ({
   offSub: { fontFamily: fonts.body, fontSize: 14, color: colors.muted, textAlign: "center" },
   backToShop: { marginTop: 16, backgroundColor: colors.brandPrimary, borderRadius: 999, paddingHorizontal: 24, paddingVertical: 12 },
   backToShopText: { fontFamily: fonts.bodyMedium, color: colors.onBrandPrimary, fontSize: 15 },
+  nameInput: { alignSelf: "stretch", marginTop: 8, backgroundColor: colors.surfaceSecondary, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12, fontFamily: fonts.body, fontSize: 15, color: colors.onSurface, borderWidth: 1, borderColor: colors.surfaceTertiary, textAlign: "center" },
 
   videoFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
 
@@ -362,6 +431,8 @@ const useStyles = makeStyles((colors) => ({
   chatBubble: { alignSelf: "flex-start", backgroundColor: "rgba(0,0,0,0.4)", borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, maxWidth: "100%" },
   chatName: { fontFamily: fonts.bodyMedium, fontSize: 13, color: "#FFD9F3" },
   chatText: { fontFamily: fonts.body, fontSize: 13, color: "#fff" },
+  joinBubble: { alignSelf: "center", backgroundColor: "rgba(168,85,247,0.25)", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
+  joinText: { fontFamily: fonts.body, fontSize: 11, color: "rgba(255,255,255,0.85)", fontStyle: "italic" },
 
   featuredBar: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "rgba(233,213,255,0.94)", borderRadius: 16, marginHorizontal: 12, paddingHorizontal: 12, paddingVertical: 10 },
   featuredImg: { width: 52, height: 52, borderRadius: 10, backgroundColor: colors.surfaceTertiary },

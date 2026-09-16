@@ -54,6 +54,8 @@ export default function ProductForm() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [aiInfoLoading, setAiInfoLoading] = useState(false);
+  const [enhancingIndex, setEnhancingIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (data) {
@@ -90,6 +92,44 @@ export default function ProductForm() {
       if (res.urls.length) setFotos((p) => [...p, ...res.urls].slice(0, MAX_PHOTOS));
     } finally {
       setUploading(false);
+    }
+  };
+
+  const generateInfo = async () => {
+    setError(null);
+    if (!fotos.length) {
+      setError("Unggah minimal 1 foto dulu untuk memakai AI.");
+      return;
+    }
+    setAiInfoLoading(true);
+    try {
+      const res = await apiRequest<{ nama_produk: string; deskripsi: string; kategori: string }>(
+        "/api/admin/ai/product-info",
+        { method: "POST", body: { foto_url: fotos[0] } },
+      );
+      if (res.nama_produk) setNama(res.nama_produk);
+      if (res.deskripsi) setDeskripsi(res.deskripsi);
+      if (res.kategori) setKategori(res.kategori);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Gagal membuat data dengan AI.");
+    } finally {
+      setAiInfoLoading(false);
+    }
+  };
+
+  const enhancePhoto = async (index: number) => {
+    setError(null);
+    setEnhancingIndex(index);
+    try {
+      const res = await apiRequest<{ url: string }>("/api/admin/ai/enhance-photo", {
+        method: "POST",
+        body: { foto_url: fotos[index] },
+      });
+      if (res.url) setFotos((p) => p.map((f, i) => (i === index ? res.url : f)));
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Gagal mempercantik foto dengan AI.");
+    } finally {
+      setEnhancingIndex(null);
     }
   };
 
@@ -148,6 +188,14 @@ export default function ProductForm() {
               <Pressable testID={`remove-photo-${i}`} style={styles.removePhoto} onPress={() => setFotos((p) => p.filter((_, idx) => idx !== i))}>
                 <MaterialDesignIcons name="close" size={14} color={colors.onError} />
               </Pressable>
+              <Pressable
+                testID={`enhance-photo-${i}`}
+                style={styles.enhanceBtn}
+                disabled={enhancingIndex !== null}
+                onPress={() => enhancePhoto(i)}
+              >
+                <MaterialDesignIcons name={enhancingIndex === i ? "loading" : "auto-fix"} size={14} color="#fff" />
+              </Pressable>
             </View>
           ))}
           {fotos.length < MAX_PHOTOS ? (
@@ -156,6 +204,19 @@ export default function ProductForm() {
             </Pressable>
           ) : null}
         </View>
+
+        <Pressable
+          testID="ai-generate-info"
+          style={[styles.aiBtn, (aiInfoLoading || !fotos.length) && styles.aiBtnDisabled]}
+          disabled={aiInfoLoading || !fotos.length}
+          onPress={generateInfo}
+        >
+          <MaterialDesignIcons name={aiInfoLoading ? "loading" : "auto-fix"} size={18} color={colors.onBrandPrimary} />
+          <Text style={styles.aiBtnText}>{aiInfoLoading ? "Membuat dengan AI..." : "✨ Isi Nama, Deskripsi & Kategori (AI)"}</Text>
+        </Pressable>
+        <Text style={styles.aiHint}>
+          AI membaca foto pertama untuk mengisi data produk. Ikon ✨ di tiap foto mempercantiknya jadi foto iklan.
+        </Text>
 
         <M3TextField label="Kategori" icon="shape-outline" placeholder="Tas, Baju, dll" value={kategori} onChangeText={setKategori} containerTestID="product-kategori" />
         <M3TextField label="Nama Produk *" icon="tag-outline" value={nama} onChangeText={setNama} containerTestID="product-nama" />
@@ -231,6 +292,30 @@ const useStyles = makeStyles((colors) => ({
     alignItems: "center",
     justifyContent: "center",
   },
+  enhanceBtn: {
+    position: "absolute",
+    bottom: 4,
+    left: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.brandPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  aiBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: colors.brandPrimary,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  aiBtnDisabled: { opacity: 0.5 },
+  aiBtnText: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onBrandPrimary },
+  aiHint: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, marginTop: -6 },
   addPhoto: {
     width: 76,
     height: 76,
