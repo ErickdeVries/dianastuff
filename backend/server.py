@@ -4,6 +4,7 @@ from fastapi.concurrency import run_in_threadpool
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import ReturnDocument
 import os
 import logging
 import re
@@ -557,24 +558,43 @@ async def get_product(product_id: str):
 from agora_token_builder import RtcTokenBuilder  # noqa: E402
 
 LIVE_CHANNEL = "dianastuff_live"
-# ---- In-memory live session state (reset each show) ----
-LIVE_CHAT_BUFFER: List[dict] = []      # recent live chat messages
-LIVE_VIEWERS: dict = {}                # sid -> {name, role, user_id}
-LIVE_MUTED: set = set()                # muted user_ids (cannot chat)
-LIVE_KICKED: set = set()               # kicked user_ids (removed, cannot rejoin)
-LIVE_PINNED: Optional[dict] = None     # pinned comment {id,name,role,text}
-LIVE_STATS: dict = {"peak_viewers": 0, "total_likes": 0}
+# ---- Live session state disimpan di MongoDB (bukan memori) supaya realtime ----
+# ---- tetap konsisten walau produksi jalan di banyak worker/replika.      ----
+LIVE_REACTIONS = {"❤️", "👍", "😍", "🔥", "👏", "😮"}
 
 
-def _reset_live_state() -> None:
-    global LIVE_PINNED
-    LIVE_CHAT_BUFFER.clear()
-    LIVE_VIEWERS.clear()
-    LIVE_MUTED.clear()
-    LIVE_KICKED.clear()
-    LIVE_PINNED = None
-    LIVE_STATS["peak_viewers"] = 0
-    LIVE_STATS["total_likes"] = 0
+async def _live_state() -> dict:
+    doc = await db.live_state.find_one({"_id": "current"})
+    if not doc:
+        doc = {
+            "_id": "current",
+            "pinned": None,
+            "total_likes": 0,
+            "peak_viewers": 0,
+            "muted": [],
+            "kicked": [],
+            "react_seq": 0,
+        }
+        await db.live_state.insert_one(doc)
+    return doc
+
+
+async def _reset_live_state() -> None:
+    await db.live_state.update_one(
+        {"_id": "current"},
+        {"$set": {"pinned": None, "total_likes": 0, "peak_viewers": 0, "muted": [], "kicked": [], "react_seq": 0, "msg_seq": 0}},
+        upsert=True,
+    )
+    await db.live_messages.delete_many({})
+    await db.live_reactions.delete_many({})
+    await db.live_presence.delete_many({})
+
+
+async def _optional_user(request: Request) -> Optional[dict]:
+    token = request.headers.get("authorization", "").replace("Bearer ", "").strip()
+    if not token:
+        return None
+    return await _user_from_token(token)
 
 
 class LiveStart(BaseModel):
@@ -681,9 +701,10 @@ async def _build_recap(show: dict) -> dict:
         async for o in cur:
             orders_count += 1
             orders_total += float(o.get("total") or 0)
+    state = await _live_state()
     return {
-        "peak_viewers": int(LIVE_STATS.get("peak_viewers", 0)),
-        "total_likes": int(LIVE_STATS.get("total_likes", 0)),
+        "peak_viewers": int(state.get("peak_viewers", 0)),
+        "total_likes": int(state.get("total_likes", 0)),
         "orders_count": orders_count,
         "orders_total": orders_total,
     }
@@ -729,6 +750,218 @@ async def delete_live_history(show_id: str, admin: dict = Depends(require_admin)
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Rekap tidak ditemukan")
     return {"ok": True}
+
+
+# ---- Live shopping realtime via MongoDB + REST polling (multi-worker safe) ----
+class LiveChatIn(BaseModel):
+    viewer_id: Optional[str] = None
+    name: Optional[str] = None
+    text: str = ""
+
+
+class LiveReactIn(BaseModel):
+    emoji: Optional[str] = "❤️"
+    viewer_id: Optional[str] = None
+
+
+class LivePresenceIn(BaseModel):
+    viewer_id: Optional[str] = None
+    name: Optional[str] = None
+
+
+class LivePinIn(BaseModel):
+    message: Optional[dict] = None
+
+
+class LiveModIn(BaseModel):
+    uid: str
+    mute: bool = True
+
+
+async def _live_viewer(request: Request, viewer_id: Optional[str]) -> dict:
+    user = await _optional_user(request)
+    if user:
+        return {
+            "uid": user["user_id"],
+            "user_id": user["user_id"],
+            "name": user.get("nama") or user.get("username") or "Tamu",
+            "role": user.get("role", "buyer"),
+        }
+    vid = (viewer_id or "").strip() or uuid.uuid4().hex
+    return {"uid": f"guest_{vid}", "user_id": f"guest_{vid}", "name": "Tamu", "role": "guest"}
+
+
+async def _next_seq(field: str) -> int:
+    doc = await db.live_state.find_one_and_update(
+        {"_id": "current"},
+        {"$inc": {field: 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    return int(doc.get(field, 1))
+
+
+@api_router.post("/live/chat")
+async def live_chat_post(payload: LiveChatIn, request: Request):
+    show = await db.live_shows.find_one({"status": "live"})
+    if not show:
+        raise HTTPException(status_code=400, detail="Tidak ada siaran live")
+    viewer = await _live_viewer(request, payload.viewer_id)
+    state = await _live_state()
+    if viewer["uid"] in (state.get("kicked") or []):
+        raise HTTPException(status_code=403, detail="Anda dikeluarkan dari live")
+    if viewer["uid"] in (state.get("muted") or []):
+        return {"ok": False, "muted": True}
+    text = (payload.text or "").strip()[:300]
+    if not text:
+        return {"ok": False}
+    name = ((payload.name or viewer["name"]) or "Tamu").strip()[:40] or "Tamu"
+    seq = await _next_seq("msg_seq")
+    msg = {
+        "id": uuid.uuid4().hex[:12],
+        "seq": seq,
+        "uid": viewer["uid"],
+        "name": name,
+        "role": viewer["role"],
+        "text": text,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.live_messages.insert_one(dict(msg))
+    return {"ok": True, "message": msg}
+
+
+@api_router.post("/live/react")
+async def live_react_post(payload: LiveReactIn):
+    show = await db.live_shows.find_one({"status": "live"})
+    if not show:
+        return {"ok": False}
+    emoji = payload.emoji if payload.emoji in LIVE_REACTIONS else "❤️"
+    seq = await _next_seq("react_seq")
+    await db.live_state.update_one({"_id": "current"}, {"$inc": {"total_likes": 1}}, upsert=True)
+    await db.live_reactions.insert_one({"seq": seq, "emoji": emoji, "ts": datetime.now(timezone.utc).isoformat()})
+    return {"ok": True}
+
+
+@api_router.post("/live/presence")
+async def live_presence_post(payload: LivePresenceIn, request: Request):
+    viewer = await _live_viewer(request, payload.viewer_id)
+    now = datetime.now(timezone.utc)
+    name = ((payload.name or viewer["name"]) or "Tamu").strip()[:40] or "Tamu"
+    await db.live_presence.update_one(
+        {"uid": viewer["uid"]},
+        {"$set": {"uid": viewer["uid"], "user_id": viewer["user_id"], "name": name, "role": viewer["role"], "last_seen": now}},
+        upsert=True,
+    )
+    state = await _live_state()
+    return {"ok": True, "muted": viewer["uid"] in (state.get("muted") or []), "kicked": viewer["uid"] in (state.get("kicked") or [])}
+
+
+@api_router.post("/live/leave")
+async def live_leave_post(payload: LivePresenceIn, request: Request):
+    viewer = await _live_viewer(request, payload.viewer_id)
+    await db.live_presence.delete_one({"uid": viewer["uid"]})
+    return {"ok": True}
+
+
+async def _viewers_now() -> list:
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=12)
+    # prune very stale presence
+    await db.live_presence.delete_many({"last_seen": {"$lt": datetime.now(timezone.utc) - timedelta(seconds=60)}})
+    state = await _live_state()
+    muted = set(state.get("muted") or [])
+    seen: dict = {}
+    order: list = []
+    cur = db.live_presence.find({"last_seen": {"$gte": cutoff}}, {"_id": 0})
+    async for v in cur:
+        uid = v.get("user_id") or v.get("uid")
+        if uid in seen:
+            continue
+        entry = {"name": v.get("name") or "Tamu", "role": v.get("role", "guest"), "uid": v.get("uid"), "muted": v.get("uid") in muted}
+        seen[uid] = entry
+        order.append(entry)
+    return order
+
+
+@api_router.get("/live/feed")
+async def live_feed(
+    request: Request,
+    since_seq: int = 0,
+    since_react: int = 0,
+    viewer_id: Optional[str] = None,
+):
+    show = await db.live_shows.find_one({"status": "live"}, {"_id": 0})
+    if not show:
+        return {"live": False}
+    viewer = await _live_viewer(request, viewer_id)
+    state = await _live_state()
+
+    messages = await db.live_messages.find({"seq": {"$gt": since_seq}}, {"_id": 0}).sort("seq", 1).to_list(100)
+    reactions = await db.live_reactions.find({"seq": {"$gt": since_react}}, {"_id": 0}).sort("seq", 1).to_list(50)
+    viewers = await _viewers_now()
+    count = len(viewers)
+    if count > int(state.get("peak_viewers", 0)):
+        await db.live_state.update_one({"_id": "current"}, {"$set": {"peak_viewers": count}}, upsert=True)
+
+    last_seq = messages[-1]["seq"] if messages else since_seq
+    last_react = reactions[-1]["seq"] if reactions else since_react
+
+    featured = None
+    fid = show.get("featured_product_id")
+    if fid:
+        fdoc = await db.products.find_one({"id": fid, "deleted_at": None}, {"_id": 0})
+        if fdoc:
+            featured = product_public(fdoc)
+
+    return {
+        "live": True,
+        "messages": messages,
+        "last_seq": last_seq,
+        "reactions": reactions,
+        "last_react": last_react,
+        "total_likes": int(state.get("total_likes", 0)),
+        "pinned": state.get("pinned"),
+        "featured": featured,
+        "viewers": viewers,
+        "viewers_count": count,
+        "muted": viewer["uid"] in (state.get("muted") or []),
+        "kicked": viewer["uid"] in (state.get("kicked") or []),
+    }
+
+
+@api_router.post("/live/pin")
+async def live_pin(payload: LivePinIn, admin: dict = Depends(require_admin)):
+    msg = payload.message or {}
+    pinned = {
+        "id": msg.get("id"),
+        "name": msg.get("name") or "Tamu",
+        "role": msg.get("role", "guest"),
+        "text": (msg.get("text") or "")[:300],
+    }
+    if not pinned["text"]:
+        raise HTTPException(status_code=400, detail="Komentar kosong")
+    await db.live_state.update_one({"_id": "current"}, {"$set": {"pinned": pinned}}, upsert=True)
+    return {"pinned": pinned}
+
+
+@api_router.post("/live/unpin")
+async def live_unpin(admin: dict = Depends(require_admin)):
+    await db.live_state.update_one({"_id": "current"}, {"$set": {"pinned": None}}, upsert=True)
+    return {"pinned": None}
+
+
+@api_router.post("/live/mute")
+async def live_mute(payload: LiveModIn, admin: dict = Depends(require_admin)):
+    op = "$addToSet" if payload.mute else "$pull"
+    await db.live_state.update_one({"_id": "current"}, {op: {"muted": payload.uid}}, upsert=True)
+    return {"ok": True, "uid": payload.uid, "muted": payload.mute}
+
+
+@api_router.post("/live/kick")
+async def live_kick(payload: LiveModIn, admin: dict = Depends(require_admin)):
+    await db.live_state.update_one({"_id": "current"}, {"$addToSet": {"kicked": payload.uid}}, upsert=True)
+    await db.live_presence.delete_one({"uid": payload.uid})
+    return {"ok": True, "uid": payload.uid}
+
 
 
 @api_router.get("/live/token")
@@ -1685,162 +1918,6 @@ async def message(sid, data):
     await sio.emit("message", chat_public(doc), room=[room, "admins"])
 
 
-# ---- Live shopping realtime (chat + reactions + moderation, open to guests) ----
-async def _emit_live_viewers() -> None:
-    # Dedup by user_id (guest user_ids are unique per connection).
-    seen: dict = {}
-    order: list = []
-    for v in LIVE_VIEWERS.values():
-        uid = v.get("user_id")
-        if uid in seen:
-            continue
-        entry = {"name": v.get("name") or "Tamu", "role": v.get("role", "guest"), "uid": uid, "muted": uid in LIVE_MUTED}
-        seen[uid] = entry
-        order.append(entry)
-    if len(order) > LIVE_STATS.get("peak_viewers", 0):
-        LIVE_STATS["peak_viewers"] = len(order)
-    await sio.emit("live_viewers", {"count": len(order), "viewers": order}, room=["live", "admins"])
-
-
-async def _sids_for_uid(uid: str) -> list:
-    return [s for s, v in LIVE_VIEWERS.items() if v.get("user_id") == uid]
-
-
-@sio.event
-async def join_live(sid, data):
-    session = await sio.get_session(sid)
-    uid = session.get("user_id")
-    if uid in LIVE_KICKED:
-        await sio.emit("live_kicked", {}, to=sid)
-        return
-    await sio.enter_room(sid, "live")
-    LIVE_VIEWERS[sid] = {
-        "name": session.get("nama") or session.get("username") or "Tamu",
-        "role": session.get("role", "guest"),
-        "user_id": uid,
-    }
-    if LIVE_CHAT_BUFFER:
-        await sio.emit("live_chat_history", LIVE_CHAT_BUFFER[-50:], to=sid)
-    if LIVE_PINNED:
-        await sio.emit("live_pinned", {"pinned": LIVE_PINNED}, to=sid)
-    if uid in LIVE_MUTED:
-        await sio.emit("live_muted", {"muted": True}, to=sid)
-    await _emit_live_viewers()
-
-
-@sio.event
-async def leave_live(sid, data):
-    await sio.leave_room(sid, "live")
-    if LIVE_VIEWERS.pop(sid, None) is not None:
-        await _emit_live_viewers()
-
-
-@sio.event
-async def disconnect(sid):
-    if LIVE_VIEWERS.pop(sid, None) is not None:
-        await _emit_live_viewers()
-
-
-@sio.event
-async def live_chat(sid, data):
-    session = await sio.get_session(sid)
-    uid = session.get("user_id")
-    if uid in LIVE_KICKED or uid in LIVE_MUTED:
-        await sio.emit("live_muted", {"muted": True}, to=sid)
-        return
-    text = ((data or {}).get("text") or "").strip()[:300]
-    if not text:
-        return
-    name = ((data or {}).get("name") or session.get("nama") or "Tamu").strip()[:40] or "Tamu"
-    msg = {
-        "id": uuid.uuid4().hex[:12],
-        "uid": uid,
-        "name": name,
-        "role": session.get("role", "guest"),
-        "text": text,
-        "ts": datetime.now(timezone.utc).isoformat(),
-    }
-    LIVE_CHAT_BUFFER.append(msg)
-    if len(LIVE_CHAT_BUFFER) > 100:
-        del LIVE_CHAT_BUFFER[: len(LIVE_CHAT_BUFFER) - 100]
-    await sio.emit("live_chat", msg, room=["live", "admins"])
-
-
-LIVE_REACTIONS = {"❤️", "👍", "😍", "🔥", "👏", "😮"}
-
-
-@sio.event
-async def live_react(sid, data):
-    emoji = (data or {}).get("emoji") or "❤️"
-    if emoji not in LIVE_REACTIONS:
-        emoji = "❤️"
-    LIVE_STATS["total_likes"] = LIVE_STATS.get("total_likes", 0) + 1
-    await sio.emit("live_react", {"emoji": emoji}, room=["live", "admins"])
-
-
-# ---- Admin moderation (pin / mute / kick) ----
-async def _is_admin_sid(sid) -> bool:
-    session = await sio.get_session(sid)
-    return session.get("role") == "admin"
-
-
-@sio.event
-async def pin_comment(sid, data):
-    global LIVE_PINNED
-    if not await _is_admin_sid(sid):
-        return
-    msg = (data or {}).get("message") or data or {}
-    pinned = {
-        "id": msg.get("id"),
-        "name": msg.get("name") or "Tamu",
-        "role": msg.get("role", "guest"),
-        "text": (msg.get("text") or "")[:300],
-    }
-    if not pinned["text"]:
-        return
-    LIVE_PINNED = pinned
-    await sio.emit("live_pinned", {"pinned": pinned}, room=["live", "admins"])
-
-
-@sio.event
-async def unpin_comment(sid, data):
-    global LIVE_PINNED
-    if not await _is_admin_sid(sid):
-        return
-    LIVE_PINNED = None
-    await sio.emit("live_pinned", {"pinned": None}, room=["live", "admins"])
-
-
-@sio.event
-async def mod_mute(sid, data):
-    if not await _is_admin_sid(sid):
-        return
-    uid = (data or {}).get("uid")
-    mute = bool((data or {}).get("mute", True))
-    if not uid:
-        return
-    if mute:
-        LIVE_MUTED.add(uid)
-    else:
-        LIVE_MUTED.discard(uid)
-    for s in await _sids_for_uid(uid):
-        await sio.emit("live_muted", {"muted": mute}, to=s)
-    await _emit_live_viewers()
-
-
-@sio.event
-async def mod_kick(sid, data):
-    if not await _is_admin_sid(sid):
-        return
-    uid = (data or {}).get("uid")
-    if not uid:
-        return
-    LIVE_KICKED.add(uid)
-    for s in await _sids_for_uid(uid):
-        await sio.emit("live_kicked", {}, to=s)
-        await sio.leave_room(s, "live")
-        LIVE_VIEWERS.pop(s, None)
-    await _emit_live_viewers()
 
 
 # Wrap FastAPI with Socket.IO. Uvicorn serves this combined `app`.

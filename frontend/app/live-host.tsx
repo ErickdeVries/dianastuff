@@ -7,18 +7,25 @@ import { FlatList, Linking, Modal, Pressable, ScrollView, Share, Text, TextInput
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { stopLive } from "@/src/api/live";
+import {
+  kickLiveViewer,
+  LiveFeedMsg,
+  muteLiveViewer,
+  pinLiveComment,
+  sendLiveChat,
+  stopLive,
+  unpinLiveComment,
+} from "@/src/api/live";
 import { ConfirmDialog } from "@/src/components/confirm-dialog";
 import { FloatingEmoji } from "@/src/components/floating-emoji";
 import { LiveVideo, LiveVideoHandle, LiveFilterId, LiveQuality } from "@/src/components/live-video";
 import { useAuth } from "@/src/context/auth";
 import { useToast } from "@/src/context/toast";
-import { connectSocket } from "@/src/lib/socket";
+import { useLivePoll } from "@/src/hooks/useLivePoll";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { PUBLIC_WEB_URL } from "@/src/utils/links";
 
-type LiveChatMsg = { id: string; uid?: string; name: string; role: string; text: string };
-type Viewer = { name: string; role: string; uid: string; muted: boolean };
+type LiveChatMsg = LiveFeedMsg;
 
 const FILTERS: { id: LiveFilterId; label: string; icon: string }[] = [
   { id: "none", label: "Normal", icon: "circle-off-outline" },
@@ -45,12 +52,8 @@ export default function LiveHostScreen() {
   const queryClient = useQueryClient();
   const videoRef = useRef<LiveVideoHandle>(null);
 
-  const [chat, setChat] = useState<LiveChatMsg[]>([]);
   const [text, setText] = useState("");
-  const [viewers, setViewers] = useState<{ count: number; list: Viewer[] }>({ count: 0, list: [] });
   const [viewersOpen, setViewersOpen] = useState(false);
-  const [pinned, setPinned] = useState<{ name: string; role: string; text: string } | null>(null);
-  const [floats, setFloats] = useState<{ key: string; emoji: string; offset: number }[]>([]);
   const [filterOpen, setFilterOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<LiveFilterId>("none");
   const [beautyLevel, setBeautyLevel] = useState(0.6);
@@ -60,37 +63,13 @@ export default function LiveHostScreen() {
   const chatRef = useRef<FlatList<LiveChatMsg>>(null);
   const showBeauty = activeFilter === "halus" || activeFilter === "cerah";
 
-  useEffect(() => {
-    let alive = true;
-    let socket: any = null;
-    const onChat = (m: LiveChatMsg) =>
-      alive && setChat((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m].slice(-100)));
-    const onViewers = (p: { count: number; viewers: Viewer[] }) =>
-      alive && setViewers({ count: p?.count ?? 0, list: p?.viewers ?? [] });
-    const onPinned = (p: { pinned: any }) => alive && setPinned(p?.pinned ?? null);
-    const onReact = (r: { emoji: string }) =>
-      alive &&
-      setFloats((prev) =>
-        [...prev, { key: `${Date.now()}-${Math.random()}`, emoji: r?.emoji || "❤️", offset: Math.random() * 40 }].slice(-24),
-      );
-    (async () => {
-      socket = await connectSocket();
-      if (!alive) return;
-      socket.on("live_chat", onChat);
-      socket.on("live_viewers", onViewers);
-      socket.on("live_pinned", onPinned);
-      socket.on("live_react", onReact);
-    })();
-    return () => {
-      alive = false;
-      if (socket) {
-        socket.off("live_chat", onChat);
-        socket.off("live_viewers", onViewers);
-        socket.off("live_pinned", onPinned);
-        socket.off("live_react", onReact);
-      }
-    };
-  }, []);
+  const isAdmin = user?.role === "admin";
+  // Host polls the live feed but does NOT register presence (host is not a viewer).
+  const { chat, floats, removeFloat, viewers: viewerState, pinned, getVid } = useLivePoll({
+    enabled: isAdmin,
+    registerPresence: false,
+  });
+  const viewers = { count: viewerState.count, list: viewerState.list };
 
   useEffect(() => {
     if (chat.length) setTimeout(() => chatRef.current?.scrollToEnd({ animated: true }), 80);
@@ -109,30 +88,26 @@ export default function LiveHostScreen() {
   const sendComment = async () => {
     const t = text.trim();
     if (!t) return;
-    const socket = await connectSocket();
-    socket.emit("live_chat", { text: t });
     setText("");
+    const vid = await getVid();
+    sendLiveChat({ viewerId: vid, name: user?.nama || "Admin", text: t }).catch(() => {});
   };
 
   const doPin = async (m: LiveChatMsg) => {
-    const socket = await connectSocket();
-    socket.emit("pin_comment", { message: m });
+    pinLiveComment({ id: m.id, name: m.name, role: m.role, text: m.text }).catch(() => {});
     toast.show("Komentar disematkan", "success");
   };
   const doUnpin = async () => {
-    const socket = await connectSocket();
-    socket.emit("unpin_comment", {});
+    unpinLiveComment().catch(() => {});
   };
   const doMute = async (uid: string, mute: boolean) => {
     if (!uid) return;
-    const socket = await connectSocket();
-    socket.emit("mod_mute", { uid, mute });
+    muteLiveViewer(uid, mute).catch(() => {});
     toast.show(mute ? "Penonton dibisukan" : "Bisukan dibuka", "info");
   };
   const doKick = async (uid: string) => {
     if (!uid) return;
-    const socket = await connectSocket();
-    socket.emit("mod_kick", { uid });
+    kickLiveViewer(uid).catch(() => {});
     toast.show("Penonton dikeluarkan", "info");
   };
 
@@ -291,7 +266,7 @@ export default function LiveHostScreen() {
 
       {/* Floating reactions */}
       {floats.map((f) => (
-        <FloatingEmoji key={f.key} emoji={f.emoji} offset={f.offset} onDone={() => setFloats((prev) => prev.filter((x) => x.key !== f.key))} />
+        <FloatingEmoji key={f.key} emoji={f.emoji} offset={f.offset} onDone={() => removeFloat(f.key)} />
       ))}
       </View>
 

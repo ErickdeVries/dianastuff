@@ -7,19 +7,17 @@ import { FlatList, Linking, Pressable, ScrollView, Share, Text, TextInput, View 
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { getCurrentLive, LiveProduct, LiveState } from "@/src/api/live";
+import { getCurrentLive, LiveFeedMsg, LiveProduct, LiveState, sendLiveChat, sendLiveReaction } from "@/src/api/live";
 import { FloatingEmoji } from "@/src/components/floating-emoji";
 import { LiveVideo } from "@/src/components/live-video";
 import { useAuth } from "@/src/context/auth";
-import { connectSocket } from "@/src/lib/socket";
+import { useLivePoll } from "@/src/hooks/useLivePoll";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { formatRupiah } from "@/src/utils/format";
 import { resolveImageUrl } from "@/src/utils/image";
 import { PUBLIC_WEB_URL } from "@/src/utils/links";
 
 const REACTIONS = ["❤️", "🔥", "😍", "👍", "👏", "😮"];
-
-type LiveChatMsg = { id: string; name: string; role: string; text: string; ts?: string };
 
 function waLink(no: string): string {
   let d = (no || "").replace(/\D/g, "");
@@ -41,76 +39,27 @@ export default function LiveViewerScreen() {
     refetchInterval: 8000,
   });
 
-  const [chat, setChat] = useState<LiveChatMsg[]>([]);
   const [text, setText] = useState("");
-  const [floats, setFloats] = useState<{ key: string; emoji: string; offset: number }[]>([]);
-  const [viewerCount, setViewerCount] = useState(0);
-  const [pinned, setPinned] = useState<{ name: string; role: string; text: string } | null>(null);
-  const [muted, setMuted] = useState(false);
-  const [kicked, setKicked] = useState(false);
-  const [featuredLive, setFeaturedLive] = useState<LiveProduct | null | undefined>(undefined);
-  const chatRef = useRef<FlatList<LiveChatMsg>>(null);
-
-  const featured = featuredLive !== undefined ? featuredLive : data?.featured ?? null;
+  const chatRef = useRef<FlatList<LiveFeedMsg>>(null);
 
   const gated = !!data?.require_login && !user;
   const active = !!data?.live && !gated;
 
-  // Realtime: join the live room, receive chat + reactions.
-  useEffect(() => {
-    if (!active) return;
-    let alive = true;
-    let socket: any = null;
-    const join = () => socket?.emit("join_live", {});
-    const onHistory = (msgs: LiveChatMsg[]) => alive && setChat(Array.isArray(msgs) ? msgs : []);
-    const onChat = (m: LiveChatMsg) =>
-      alive && setChat((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m].slice(-80)));
-    const onReact = (r: { emoji: string }) =>
-      alive &&
-      setFloats((prev) =>
-        [...prev, { key: `${Date.now()}-${Math.random()}`, emoji: r?.emoji || "❤️", offset: Math.random() * 40 }].slice(-24),
-      );
-    const onViewers = (p: { count: number }) => alive && setViewerCount(p?.count ?? 0);
-    const onFeature = (p: { featured: LiveProduct | null }) => alive && setFeaturedLive(p?.featured ?? null);
-    const onPinned = (p: { pinned: { name: string; role: string; text: string } | null }) =>
-      alive && setPinned(p?.pinned ?? null);
-    const onMuted = (p: { muted: boolean }) => alive && setMuted(!!p?.muted);
-    const onKicked = () => {
-      if (!alive) return;
-      setKicked(true);
-    };
+  const {
+    chat,
+    floats,
+    removeFloat,
+    addFloat,
+    viewers,
+    pinned,
+    muted,
+    kicked,
+    featured: featuredLive,
+    getVid,
+  } = useLivePoll({ enabled: active, registerPresence: true, name: user?.nama || undefined });
 
-    (async () => {
-      socket = await connectSocket();
-      if (!alive) return;
-      if (socket.connected) join();
-      socket.on("connect", join);
-      socket.on("live_chat_history", onHistory);
-      socket.on("live_chat", onChat);
-      socket.on("live_react", onReact);
-      socket.on("live_viewers", onViewers);
-      socket.on("live_feature", onFeature);
-      socket.on("live_pinned", onPinned);
-      socket.on("live_muted", onMuted);
-      socket.on("live_kicked", onKicked);
-    })();
-
-    return () => {
-      alive = false;
-      if (socket) {
-        socket.emit("leave_live", {});
-        socket.off("connect", join);
-        socket.off("live_chat_history", onHistory);
-        socket.off("live_chat", onChat);
-        socket.off("live_react", onReact);
-        socket.off("live_viewers", onViewers);
-        socket.off("live_feature", onFeature);
-        socket.off("live_pinned", onPinned);
-        socket.off("live_muted", onMuted);
-        socket.off("live_kicked", onKicked);
-      }
-    };
-  }, [active]);
+  const viewerCount = viewers.count;
+  const featured = featuredLive !== undefined ? featuredLive : data?.featured ?? null;
 
   useEffect(() => {
     if (chat.length) setTimeout(() => chatRef.current?.scrollToEnd({ animated: true }), 80);
@@ -119,14 +68,15 @@ export default function LiveViewerScreen() {
   const sendChat = async () => {
     const t = text.trim();
     if (!t) return;
-    const socket = await connectSocket();
-    socket.emit("live_chat", { text: t, name: user?.nama || undefined });
     setText("");
+    const vid = await getVid();
+    sendLiveChat({ viewerId: vid, name: user?.nama || undefined, text: t }).catch(() => {});
   };
 
   const sendReaction = async (emoji: string) => {
-    const socket = await connectSocket();
-    socket.emit("live_react", { emoji });
+    addFloat(emoji);
+    const vid = await getVid();
+    sendLiveReaction({ viewerId: vid, emoji }).catch(() => {});
   };
 
   const onShare = async () => {
@@ -261,7 +211,7 @@ export default function LiveViewerScreen() {
           key={f.key}
           emoji={f.emoji}
           offset={f.offset}
-          onDone={() => setFloats((prev) => prev.filter((x) => x.key !== f.key))}
+          onDone={() => removeFloat(f.key)}
         />
       ))}
 

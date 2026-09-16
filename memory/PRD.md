@@ -350,9 +350,25 @@ Inter body. Language: Indonesian.
   ulang iter26: reaction tamu kini MUNCUL juga di layar host (live_react ke room live+admins).
 - Fix host visibility butuh APK BARU (build lama belum memuat perbaikan socket).
 
-## Implemented (2026-09-14 — APK 1.0.6 dicantolkan ke Landing Page)
-- File APK dianastuff1.0.6.apk (121MB — turun dari 358MB berkat arm64 buildArchs) sudah
-  disimpan di static_downloads/app.apk dan dicantolkan ke tombol "Unduh APK Android" di landing
-  page via direct CDN URL.
-- Tombol di landing page sekarang AKTIF (warna ungu + ikon download, bukan "Segera Hadir").
-- web.zip terbaru di-rebuild dan siap diupload ke Cloudflare Pages.
+## Implemented (2026-06 fork — Live realtime migrasi ke MongoDB + REST polling), iter27
+- MASALAH: produksi jalan multi-worker → state Socket.io in-memory (LIVE_STATS/LIVE_CHAT_BUFFER/
+  LIVE_VIEWERS/LIVE_PINNED/LIVE_MUTED/LIVE_KICKED) terpecah antar worker → chat penonton web tidak
+  sampai ke host APK. Semua handler Socket.io LIVE dihapus (connect/join/message untuk chat toko &
+  notifikasi TETAP ada) dan diganti REST + polling ~1.5 dtk (state disimpan di MongoDB).
+- Backend (server.py): koleksi `live_state` (_id=current: pinned,total_likes,peak_viewers,muted[],
+  kicked[],msg_seq,react_seq), `live_messages`, `live_reactions`, `live_presence`. Endpoint:
+  GET /api/live/feed?since_seq&since_react&viewer_id (kursor inkremental → hanya kirim data baru;
+  balikan messages/reactions/viewers/viewers_count/pinned/featured/total_likes/muted/kicked),
+  POST /api/live/chat (tamu boleh; muted→ok:false, kicked→403), /api/live/react (+total_likes),
+  /api/live/presence (heartbeat upsert), /api/live/leave, /api/live/pin & /unpin (admin),
+  /api/live/mute {uid,mute} & /kick {uid} (admin). Presence dedup by user_id (login) / viewer_id
+  (tamu, dari AsyncStorage `diana_live_viewer_id`), penonton aktif = last_seen ≤12 dtk, prune >60 dtk.
+  peak_viewers di-$max saat feed. Recap (live/stop) baca peak/total_likes dari live_state.
+- Frontend: hook `src/hooks/useLivePoll.ts` (polling feed, presence tiap ~3 poll, floating emoji,
+  reset kursor+chat tiap sesi baru). `app/live.tsx` (penonton, registerPresence:true) &
+  `app/live-host.tsx` (host, registerPresence:false — host tidak dihitung penonton) memakai hook +
+  fungsi REST di `src/api/live.ts`. `src/utils/viewer-id.ts` id tamu stabil per device.
+- Diverifikasi iter27: backend 13/13 pytest (lifecycle, kursor inkremental, dedup penonton,
+  moderasi mute/kick E2E, pin, react); viewer web (chat kirim/terima via polling, emoji, featured,
+  strip produk, badge penonton). Socket.io chat toko + notifikasi order tetap jalan (regresi aman).
+  Kamera host tetap hanya aktif di build HP asli (Agora).

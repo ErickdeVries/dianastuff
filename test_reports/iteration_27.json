@@ -1,0 +1,42 @@
+{
+  "summary": "Iter27 verified the Live Shopping REST-polling migration (in-memory Socket.io state -> MongoDB-backed state + REST /api/live/feed polling) end-to-end. BACKEND 13/13 pytest PASS (test_live_rest_polling_iter27.py) covering: (1) lifecycle start/stop/current/history/delete + admin auth guard; (2) FEED CURSOR INCREMENTALITY — sent 3 chats + 2 reactions, first poll returned all with last_seq/last_react > 0; second poll with returned cursors returned ZERO of the seen items; a 4th chat sent after was the only message returned in the delta poll (no reissue); (3) VIEWER DEDUP — 3 heartbeats with same viewer_id counted as 1; distinct viewer_id increased count by 1; stale presence dropped after >12s (waited 13s and confirmed guest_<vid> removed from feed.viewers); (4) MODERATION — admin mute(uid) -> guest chat returns {ok:false, muted:true} and feed.muted=true; unmute -> chat works; kick(uid) -> guest chat 403 and feed.kicked=true; (5) PIN/UNPIN reflected in feed.pinned; (6) REACT increments total_likes across polls (base+4). FRONTEND viewer /live PASS via mobile Playwright (375x667): live badge + viewer pill(1) rendered, featured 'Blouse Katun Premium Rp 89.000' with 'Beli Sekarang' button, chat sent from UI ('TEST_iter27_hello_from_viewer') appeared in the chat list within ~1.5s polling window along with all backend TEST_ messages (proves feed polling delivers cross-source chat), reaction rail with 6 emojis (❤️🔥😍👍👏😮), tapping 🔥 3x rendered 3 floating emojis at fontSize 44 with pointerEvents:none (matches iter26 float behavior), product strip visible. Socket.io connect/join/message handlers retained for buyer<->admin store chat and new_order notifications; only LIVE realtime moved to REST — server.py inspection confirmed no live_chat/live_react/live_pin socket handlers remain, only live_status emitted on start/stop. Camera video expected black on web (Agora needs native build) — not flagged. Cleanup: live stopped, 12 TEST_iter27_* recaps deleted from history.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "props.pointerEvents", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Likely from a component still using pointerEvents as prop instead of style. Non-blocking. Reference: search codebase for pointerEvents=\"none\" as prop vs style."},
+      {"component": "textShadow", "issue": "Console warning: '\"textShadow*\" style props are deprecated. Use \"textShadow\"'. React Native Web deprecation; migrate textShadowColor/textShadowOffset/textShadowRadius to unified textShadow. Non-blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_live_rest_polling_iter27.py",
+    "/app/test_reports/pytest/pytest_iter27_live_rest.xml",
+    "/app/test_reports/screenshots/iter27_viewer_live.jpeg"
+  ],
+  "action_items": [
+    "None blocking — REST-polling migration verified end-to-end (cursor correctness, viewer dedup, stale drop, mute/kick, pin, total_likes).",
+    "OPTIONAL polish: fix two RN-Web deprecation warnings (props.pointerEvents -> style.pointerEvents; textShadow* -> textShadow) in live.tsx/live-host.tsx/floating-emoji.tsx — cosmetic only, no user impact today but will break in a future RN-Web major.",
+    "NOTE for host studio testing: /live-host camera preview is black on web (Agora requires native build) — expected; overlays (chat/viewers/pin/react) still testable via REST as the viewer test proves."
+  ],
+  "critical_code_review_comments": [
+    "server.py L794-801 _next_seq uses find_one_and_update with $inc + upsert + ReturnDocument.AFTER — atomic seq generation across workers. Correct.",
+    "server.py L898-899 feed queries messages/reactions with seq > since_seq and sorts asc — cursor logic is correct; verified empirically (no reissue after cursor advance).",
+    "server.py L866-882 _viewers_now dedup by user_id and 12s cutoff; also prunes >60s stale docs. Correct and verified.",
+    "server.py L811-814 chat path returns 403 for kicked BEFORE muted check, and {ok:false,muted:true} for muted — matches spec.",
+    "server.py L727-728 stop emits live_status/live_viewers via Socket.io for connected admin clients so /dashboard/live still lights up — but the client-side realtime now uses REST polling; Socket.io emit here is defensive and harmless.",
+    "useLivePoll.ts resets seq/react cursors + chat state on enable to correctly handle a restarted live show (msg_seq reset by _reset_live_state). Good.",
+    "useLivePoll.ts presence heartbeat every 3rd poll (~4.5s) is well under the 12s cutoff — safe margin.",
+    "viewer-id.ts caches in-memory + storage; guests get stable uid guest_<viewer_id> so mute/kick target survives page reloads."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_live_rest_polling_iter27.py (new, 13 tests)",
+    "/app/test_reports/iteration_27.json"
+  ],
+  "success_rate": {"backend": "100% (13/13 pytest)", "frontend": "100% (viewer /live: live badge, viewer=1, featured+buy, chat send/receive, 3 reactions floated, product strip)"},
+  "seed_data_creation": "Temporary lives TEST_iter27_live_rest / TEST_iter27_throwaway / TEST_iter27_ui started+stopped during tests; all 12 TEST_iter27_* recaps deleted via DELETE /api/admin/live-history/{id}. Final state: no live running, no test rekaps in history.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Live realtime is REST-only now: /api/live/feed?since_seq=&since_react=&viewer_id= returns messages/reactions/viewers/pinned/featured/muted/kicked/total_likes with monotonic seq cursors. Poll interval in frontend is 1500ms (useLivePoll). Backend seq counters (msg_seq/react_seq) live under db.live_state _id=current and reset on live/start via _reset_live_state. When writing pytest tests for /api/live, use function-scoped live_session fixture (module-scoped breaks if any test stops the show). Guests are identified as uid=guest_<viewer_id>; presence cutoff is 12s (stale) / 60s (pruned). test file: /app/backend/tests/test_live_rest_polling_iter27.py. Root pytest.ini has parallel xdist enabled — pass '-o addopts=' to disable when tests share single-live state."
+}
