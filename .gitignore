@@ -81,3 +81,9 @@ memory/test_credentials.md
 # Mobile development
 android-sdk/backend/static_downloads/app.apk
 backend/static_downloads/app.apk
+.env
+.env.*
+*.env
+credentials.json
+*.key
+.credentials
