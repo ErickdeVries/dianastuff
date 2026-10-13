@@ -1,0 +1,11 @@
+frontend/
+landing/
+memory/
+test_reports/
+tests/
+design_guidelines.json
+*.md
+.git/
+*.apk
+*.zip
+backups/
