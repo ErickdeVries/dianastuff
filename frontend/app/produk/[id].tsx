@@ -2,7 +2,7 @@ import MaterialDesignIcons from "@react-native-vector-icons/material-design-icon
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dimensions, FlatList, Linking, Pressable, ScrollView, Share, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -21,6 +21,11 @@ type Product = {
   nama_produk: string;
   deskripsi: string;
   harga: number;
+  harga_diskon?: number | null;
+  harga_final: number;
+  diskon_persen: number;
+  terjual: number;
+  views: number;
   stok: number;
   berat_gram: number;
   bisa_po: boolean;
@@ -57,6 +62,12 @@ export default function ProductDetail() {
     enabled: !!id,
   });
 
+  // Track a storefront view once per screen open (buyers & guests).
+  useEffect(() => {
+    if (!id) return;
+    apiRequest(`/api/products/${id}/view`, { method: "POST" }).catch(() => {});
+  }, [id]);
+
   const photos = product?.foto_urls?.length ? product.foto_urls : [null];
   const available = product ? product.bisa_po || product.stok > 0 : false;
 
@@ -78,7 +89,7 @@ export default function ProductDetail() {
       {
         product_id: product.id,
         nama_produk: product.nama_produk,
-        harga: product.harga,
+        harga: product.harga_final,
         foto: product.foto_urls?.[0] ?? null,
         stok: product.stok,
         bisa_po: product.bisa_po,
@@ -151,7 +162,22 @@ export default function ProductDetail() {
             <>
               {product.kategori ? <Text style={styles.kategori}>{product.kategori}</Text> : null}
               <Text style={styles.name} testID="produk-nama">{product.nama_produk}</Text>
-              <Text style={styles.price}>{formatRupiah(product.harga)}</Text>
+              {product.diskon_persen > 0 ? (
+                <View style={styles.priceWrap}>
+                  <Text style={styles.price}>{formatRupiah(product.harga_final)}</Text>
+                  <View style={styles.discTag}><Text style={styles.discTagText}>-{product.diskon_persen}%</Text></View>
+                  <Text style={styles.priceStrike}>{formatRupiah(product.harga)}</Text>
+                </View>
+              ) : (
+                <Text style={styles.price}>{formatRupiah(product.harga_final)}</Text>
+              )}
+              <View style={styles.soldRow}>
+                <MaterialDesignIcons name="check-decagram-outline" size={15} color={colors.muted} />
+                <Text style={styles.soldText}>{product.terjual} terjual</Text>
+                <Text style={styles.soldDot}>·</Text>
+                <MaterialDesignIcons name="eye-outline" size={15} color={colors.muted} />
+                <Text style={styles.soldText}>{product.views} dilihat</Text>
+              </View>
               <View style={styles.metaRow}>
                 <View style={styles.metaChip}>
                   <MaterialDesignIcons name="package-variant-closed" size={16} color={colors.onSurfaceTertiary} />
@@ -251,7 +277,7 @@ export default function ProductDetail() {
           >
             <Text style={styles.buyBtnLabel}>{available ? "Beli Sekarang" : "Stok Habis"}</Text>
             {available ? (
-              <Text style={styles.buyBtnPrice}>{formatRupiah(product.harga * qty)}</Text>
+              <Text style={styles.buyBtnPrice}>{formatRupiah(product.harga_final * qty)}</Text>
             ) : null}
           </Pressable>
         </View>
@@ -314,6 +340,13 @@ const useStyles = makeStyles((colors) => ({
   kategori: { fontFamily: fonts.bodyMedium, fontSize: 13, color: colors.brandPrimary },
   name: { fontFamily: fonts.heading, fontSize: 22, color: colors.onSurface },
   price: { fontFamily: fonts.heading, fontSize: 22, color: colors.brandPrimary },
+  priceWrap: { flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" },
+  priceStrike: { fontFamily: fonts.body, fontSize: 15, color: colors.muted, textDecorationLine: "line-through" },
+  discTag: { backgroundColor: colors.error, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  discTagText: { fontFamily: fonts.bodyMedium, fontSize: 12, color: "#fff" },
+  soldRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
+  soldText: { fontFamily: fonts.body, fontSize: 13, color: colors.muted },
+  soldDot: { fontFamily: fonts.body, fontSize: 13, color: colors.muted, marginHorizontal: 2 },
   metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   metaChip: {
     flexDirection: "row",

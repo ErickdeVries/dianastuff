@@ -13,7 +13,8 @@
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Pilih foto produk dan banner toko",
         "NSCameraUsageDescription": "Siaran live jualan pakai kamera",
-        "NSMicrophoneUsageDescription": "Suara host saat siaran live"
+        "NSMicrophoneUsageDescription": "Suara host saat siaran live",
+        "NSLocationWhenInUseUsageDescription": "Tandai titik alamat pengiriman di peta"
       }
     },
     "android": {
@@ -30,7 +31,9 @@
         "ACCESS_NETWORK_STATE",
         "ACCESS_WIFI_STATE",
         "BLUETOOTH",
-        "BLUETOOTH_CONNECT"
+        "BLUETOOTH_CONNECT",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
       ]
     },
     "web": {

@@ -27,6 +27,7 @@ type Order = {
   total: number;
   status: string;
   no_resi?: string | null;
+  biteship_tracking_id?: string | null;
   alamat: { nama?: string; wa?: string; alamat?: string; kota?: string; kode_pos?: string };
   kurir?: string;
   bukti_bayar_url?: string | null;
@@ -66,6 +67,21 @@ export default function OrderDetail() {
 
   const { data: order } = useQuery<Order>({ queryKey: ["order", id], queryFn: () => apiRequest<Order>(`/api/orders/${id}`) });
   const { data: profil } = useQuery<Profil>({ queryKey: ["profil_admin"], queryFn: () => apiRequest<Profil>("/api/profil_admin", { auth: false }) });
+
+  type Track = {
+    tracked: boolean;
+    status?: string;
+    waybill?: string | null;
+    link?: string | null;
+    history?: { status?: string; note?: string; updated_at?: string }[];
+  };
+  const canTrack = !!order?.biteship_tracking_id && (order?.status === "dikirim" || order?.status === "selesai");
+  const { data: track } = useQuery<Track>({
+    queryKey: ["order", id, "track"],
+    queryFn: () => apiRequest<Track>(`/api/orders/${id}/track`),
+    enabled: canTrack,
+    refetchInterval: 60000,
+  });
 
   const confirmPay = useMutation({
     mutationFn: () => apiRequest(`/api/orders/${id}/konfirmasi-bayar`, { method: "POST" }),
@@ -188,6 +204,29 @@ export default function OrderDetail() {
           <View style={styles.resiBox} testID="order-resi">
             <MaterialDesignIcons name="truck-fast-outline" size={20} color={colors.brandPrimary} />
             <Text style={styles.resiText}>No. Resi ({order.kurir}): <Text style={styles.resiBold}>{order.no_resi}</Text></Text>
+          </View>
+        ) : null}
+
+        {track?.tracked ? (
+          <View style={styles.card} testID="order-tracking">
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <MaterialDesignIcons name="map-marker-path" size={20} color={colors.brandPrimary} />
+              <Text style={styles.cardTitle}>Lacak Paket</Text>
+              {track.status ? <Text style={styles.trackBadge}>{track.status}</Text> : null}
+            </View>
+            {(track.history ?? []).length === 0 ? (
+              <Text style={styles.trackEmpty}>Belum ada update dari kurir. Cek lagi nanti.</Text>
+            ) : (
+              [...(track.history ?? [])].reverse().map((h, i) => (
+                <View key={i} style={styles.historyRow}>
+                  <View style={styles.historyDot} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.historyStatus}>{h.note || h.status}</Text>
+                    {h.updated_at ? <Text style={styles.historyTime}>{formatDateTime(h.updated_at)}</Text> : null}
+                  </View>
+                </View>
+              ))
+            )}
           </View>
         ) : null}
 
@@ -395,6 +434,8 @@ const useStyles = makeStyles((colors) => ({
   resiBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.brandTertiary, borderRadius: 12, padding: 12 },
   resiText: { flex: 1, fontFamily: fonts.body, fontSize: 13, color: colors.onBrandTertiary },
   resiBold: { fontFamily: fonts.bodyMedium },
+  trackBadge: { marginLeft: "auto", fontFamily: fonts.bodyMedium, fontSize: 11, color: colors.onBrandPrimary, backgroundColor: colors.brandPrimary, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3, textTransform: "capitalize" },
+  trackEmpty: { fontFamily: fonts.body, fontSize: 13, color: colors.muted, marginTop: 6 },
   historyRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
   historyDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.brandPrimary, marginTop: 4 },
   historyStatus: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onSurface },

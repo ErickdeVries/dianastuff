@@ -18,7 +18,9 @@ type Stats = {
 };
 
 const SHORTCUTS: { route: string; label: string; icon: string }[] = [
+  { route: "/dashboard/analitik", label: "Analitik Toko", icon: "chart-line" },
   { route: "/dashboard/produk", label: "Kelola Produk", icon: "tag-outline" },
+  { route: "/dashboard/voucher", label: "Voucher Diskon", icon: "ticket-percent-outline" },
   { route: "/dashboard/pelanggan", label: "Kelola Pelanggan", icon: "account-group-outline" },
   { route: "/dashboard/profil", label: "Pengaturan Toko", icon: "store-cog-outline" },
 ];

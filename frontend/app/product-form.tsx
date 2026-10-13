@@ -26,6 +26,7 @@ type Product = {
   nama_produk: string;
   deskripsi: string;
   harga: number;
+  harga_diskon?: number | null;
   stok: number;
   berat_gram: number;
   bisa_po: boolean;
@@ -51,6 +52,7 @@ export default function ProductForm() {
   const [nama, setNama] = useState("");
   const [deskripsi, setDeskripsi] = useState("");
   const [harga, setHarga] = useState("");
+  const [hargaDiskon, setHargaDiskon] = useState("");
   const [stok, setStok] = useState("");
   const [berat, setBerat] = useState("");
   const [bisaPo, setBisaPo] = useState(false);
@@ -67,6 +69,7 @@ export default function ProductForm() {
       setNama(data.nama_produk ?? "");
       setDeskripsi(data.deskripsi ?? "");
       setHarga(String(data.harga ?? ""));
+      setHargaDiskon(data.harga_diskon != null ? String(data.harga_diskon) : "");
       setStok(String(data.stok ?? ""));
       setBerat(String(data.berat_gram ?? ""));
       setBisaPo(!!data.bisa_po);
@@ -162,6 +165,11 @@ export default function ProductForm() {
       setError("Nama produk wajib diisi.");
       return;
     }
+    const hd = hargaDiskon.trim() ? parseFloat(hargaDiskon) || 0 : 0;
+    if (hd > 0 && hd >= (parseFloat(harga) || 0)) {
+      setError("Harga diskon harus lebih kecil dari harga normal.");
+      return;
+    }
     setSaving(true);
     try {
       const body = {
@@ -169,6 +177,7 @@ export default function ProductForm() {
         nama_produk: nama.trim(),
         deskripsi: deskripsi.trim(),
         harga: parseFloat(harga) || 0,
+        harga_diskon: hargaDiskon.trim() ? parseFloat(hargaDiskon) || 0 : null,
         stok: parseInt(stok, 10) || 0,
         berat_gram: parseInt(berat, 10) || 0,
         bisa_po: bisaPo,
@@ -281,6 +290,25 @@ export default function ProductForm() {
 
         <M3TextField label="Berat (gram)" icon="weight-gram" keyboardType="number-pad" placeholder="0" value={berat} onChangeText={setBerat} containerTestID="product-berat" />
 
+        <M3TextField
+          label="Harga Diskon (opsional)"
+          icon="ticket-percent-outline"
+          keyboardType="number-pad"
+          placeholder="Kosongkan jika tanpa diskon"
+          value={hargaDiskon}
+          onChangeText={setHargaDiskon}
+          containerTestID="product-harga-diskon"
+        />
+        {(() => {
+          const h = parseFloat(harga) || 0;
+          const hd = hargaDiskon.trim() ? parseFloat(hargaDiskon) || 0 : 0;
+          if (hd > 0 && hd < h) {
+            const pct = Math.round((1 - hd / h) * 100);
+            return <Text style={styles.discHint}>Diskon {pct}% — harga normal dicoret di etalase.</Text>;
+          }
+          return <Text style={styles.aiHint}>Isi harga setelah diskon. Harga normal akan tampil dicoret di etalase (gaya Shopee).</Text>;
+        })()}
+
         <View style={styles.switchRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.switchLabel}>Bisa Pre-Order (PO)</Text>
@@ -365,6 +393,7 @@ const useStyles = makeStyles((colors) => ({
   aiBtnDisabled: { opacity: 0.5 },
   aiBtnText: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onBrandPrimary },
   aiHint: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, marginTop: -6 },
+  discHint: { fontFamily: fonts.bodyMedium, fontSize: 12, color: colors.brandPrimary, marginTop: -6 },
   verRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   verBtn: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
   verBtnOff: { opacity: 0.4 },

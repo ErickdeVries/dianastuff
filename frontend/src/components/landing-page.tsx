@@ -28,7 +28,8 @@ const FEATURES = [
 ];
 
 // Link download APK Android langsung dari CDN aset.
-const APK_URL = "https://customer-assets-wrfwihn1.emergentagent.net/job_diana-store-2/artifacts/x2w19o9v_dianastuff1.0.6.apk";
+const APK_URL = "https://customer-assets-wrfwihn1.emergentagent.net/job_diana-store-2/artifacts/9uez3af1_dianastuff-1.0.8.apk";
+const APK_VERSION = "1.0.8";
 
 const INSTALL_STEPS = [
   "Tekan tombol “Unduh APK Android”, lalu buka file yang terunduh.",
@@ -182,13 +183,19 @@ export function LandingPage() {
             <MaterialDesignIcons name="android" size={34} color={colors.onBrandPrimary} />
           </View>
           <Text style={styles.apkTitle}>Lebih Nyaman Lewat Aplikasi</Text>
+          <View style={styles.updateBanner}>
+            <MaterialDesignIcons name="bell-ring-outline" size={18} color={colors.brandPrimary} />
+            <Text style={styles.updateBannerText}>
+              <Text style={styles.updateBannerBold}>Update baru v{APK_VERSION} sudah tersedia!</Text> Jika kamu sudah memasang versi lama, unduh & install ulang APK terbaru di bawah ini (data akun tetap aman) agar semua fitur terbaru berfungsi.
+            </Text>
+          </View>
           <Text style={styles.apkDesc}>
             Unduh aplikasi Android dianastuff — kamera live seller, notifikasi, dan belanja lebih cepat. Install langsung, tanpa Play Store.
           </Text>
           {APK_URL ? (
             <Pressable testID="landing-apk" style={styles.ctaPrimary} onPress={() => Linking.openURL(APK_URL)}>
               <MaterialDesignIcons name="download" size={20} color="#fff" />
-              <Text style={styles.ctaPrimaryText}>Unduh APK Android</Text>
+              <Text style={styles.ctaPrimaryText}>Unduh APK Android (v{APK_VERSION})</Text>
             </Pressable>
           ) : (
             <View style={[styles.ctaPrimary, styles.apkSoon]}>
@@ -323,6 +330,9 @@ const useStyles = makeStyles((colors) => ({
   apkCard: { backgroundColor: colors.surfaceSecondary, borderRadius: 26, padding: 28, alignItems: "center", borderWidth: 1, borderColor: colors.brandTertiary },
   apkIcon: { width: 64, height: 64, borderRadius: 20, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center", marginBottom: 14 },
   apkTitle: { fontFamily: fonts.heading, fontSize: 22, color: colors.onSurface, textAlign: "center" },
+  updateBanner: { flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: colors.brandTertiary, borderRadius: 14, padding: 14, marginTop: 14, maxWidth: 520 },
+  updateBannerText: { flex: 1, fontFamily: fonts.body, fontSize: 13, lineHeight: 20, color: colors.onSurface },
+  updateBannerBold: { fontFamily: fonts.bodyMedium, color: colors.brandPrimary },
   apkDesc: { fontFamily: fonts.body, fontSize: 14, lineHeight: 22, color: colors.muted, textAlign: "center", marginTop: 8, marginBottom: 20, maxWidth: 480 },
   apkSoon: { backgroundColor: colors.surfaceTertiary },
   apkNote: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, marginTop: 12, textAlign: "center" },

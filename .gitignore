@@ -87,3 +87,4 @@ backend/static_downloads/app.apk
 credentials.json
 *.key
 .credentials
+_arsip/

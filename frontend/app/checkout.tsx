@@ -9,9 +9,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { apiRequest, ApiError } from "@/src/api/client";
 import { M3Button } from "@/src/components/m3-button";
 import { M3TextField } from "@/src/components/m3-text-field";
+import { MapPicker, MapPoint } from "@/src/components/map-picker";
 import { useCart } from "@/src/context/cart";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { formatRupiah } from "@/src/utils/format";
+import { searchAddress } from "@/src/utils/geocode";
 
 type Me = {
   nama: string | null;
@@ -19,9 +21,20 @@ type Me = {
   alamat: string | null;
   kota: string | null;
   kode_pos: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 };
 type Rekening = { bank: string; no_rek: string; a_n: string };
 type Profil = { rekening_bank: Rekening[]; kurir_list?: string[] };
+type RateRow = {
+  courier_name?: string;
+  courier_code?: string;
+  courier_service_name?: string;
+  company?: string;
+  type?: string;
+  duration?: string;
+  price?: number;
+};
 
 export default function CheckoutScreen() {
   const styles = useStyles();
@@ -41,13 +54,20 @@ export default function CheckoutScreen() {
   const [kurir, setKurir] = useState<string | null>(null);
   const [ongkir, setOngkir] = useState<number>(0);
   const [ongkirMsg, setOngkirMsg] = useState<string | null>(null);
+  const [coord, setCoord] = useState<MapPoint | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [rates, setRates] = useState<RateRow[]>([]);
+  const [selRate, setSelRate] = useState<RateRow | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [voucherInput, setVoucherInput] = useState("");
+  const [voucherCode, setVoucherCode] = useState<string | null>(null);
+  const [voucherDiskon, setVoucherDiskon] = useState(0);
+  const [voucherMsg, setVoucherMsg] = useState<string | null>(null);
 
   const { data: me } = useQuery<Me>({ queryKey: ["me"], queryFn: () => apiRequest<Me>("/api/auth/me") });
   const { data: profil } = useQuery<Profil>({ queryKey: ["profil_admin"], queryFn: () => apiRequest<Profil>("/api/profil_admin", { auth: false }) });
 
   const hasAddress = !!(me?.alamat && me?.kota);
-  const kurirList = profil?.kurir_list ?? [];
 
   useEffect(() => {
     if (me) {
@@ -56,6 +76,7 @@ export default function CheckoutScreen() {
       setAlamat(me.alamat ?? "");
       setKota(me.kota ?? "");
       setKodePos(me.kode_pos ?? "");
+      if (me.latitude != null && me.longitude != null) setCoord({ lat: me.latitude, lng: me.longitude });
       if (!me.alamat || !me.kota) setEditingAddr(true);
     }
   }, [me]);
@@ -64,7 +85,7 @@ export default function CheckoutScreen() {
     mutationFn: () =>
       apiRequest("/api/me", {
         method: "PUT",
-        body: { nama, wa, alamat, kota, kode_pos: kodePos },
+        body: { nama, wa, alamat, kota, kode_pos: kodePos, latitude: coord?.lat, longitude: coord?.lng },
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["me"] });
@@ -76,19 +97,95 @@ export default function CheckoutScreen() {
 
   const cekOngkir = useMutation({
     mutationFn: () =>
-      apiRequest<{ found: boolean; harga: number | null }>(
-        `/api/ongkir?kota=${encodeURIComponent(me?.kota ?? "")}&kurir=${encodeURIComponent(kurir ?? "")}`,
-      ),
+      apiRequest<{ pricing: RateRow[] }>("/api/shipping/rates", {
+        method: "POST",
+        body: {
+          destination_latitude: coord?.lat,
+          destination_longitude: coord?.lng,
+          items: items.map((i) => ({
+            name: i.nama_produk ?? "Produk",
+            value: Math.round(i.harga ?? 10000),
+            length: 15, width: 15, height: 10, weight: 500,
+            quantity: i.qty,
+          })),
+        },
+      }),
     onSuccess: (res) => {
-      if (res.found && res.harga != null) {
-        setOngkir(res.harga);
-        setOngkirMsg(`Ongkir ${kurir}: ${formatRupiah(res.harga)}`);
-      } else {
-        setOngkir(0);
-        setOngkirMsg("Ongkir belum tersedia untuk kota ini. Admin akan konfirmasi sebelum pembayaran.");
-      }
+      setRates(res.pricing ?? []);
+      if (!res.pricing?.length) setOngkirMsg("Tidak ada kurir tersedia untuk titik ini.");
+      else setOngkirMsg(null);
+    },
+    onError: (e) => {
+      setRates([]);
+      setOngkirMsg(e instanceof ApiError ? e.message : "Gagal mengambil ongkir.");
     },
   });
+
+  const pickRate = (r: RateRow) => {    setSelRate(r);
+    setOngkir(r.price ?? 0);
+    const label = `${r.courier_name ?? r.company} ${r.courier_service_name ?? r.type ?? ""}`.trim();
+    setKurir(label);
+  };
+
+  // Form -> map: geocode the typed address and move the pin there.
+  const searchFromAddress = async () => {
+    const q = [alamat, kota].filter(Boolean).join(", ");
+    if (!q.trim()) {
+      setError("Isi alamat / kota dulu untuk mencari di peta.");
+      return;
+    }
+    setSearching(true);
+    setError(null);
+    try {
+      const r = await searchAddress(q);
+      if (r) {
+        setCoord({ lat: r.lat, lng: r.lng });
+      } else {
+        setError("Alamat tidak ditemukan di peta. Geser pin secara manual.");
+      }
+    } catch {
+      setError("Gagal mencari lokasi. Geser pin secara manual.");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  // Map -> form: pin moved, sync the address text field.
+  const onMapChange = (p: MapPoint) => {
+    setCoord(p);
+    if (p.address) setAlamat(p.address);
+  };
+
+  const applyVoucher = useMutation({
+    mutationFn: () =>
+      apiRequest<{ valid: boolean; diskon: number; message: string }>("/api/voucher/validate", {
+        method: "POST",
+        body: { kode: voucherInput.trim(), subtotal },
+      }),
+    onSuccess: (res) => {
+      if (res.valid) {
+        setVoucherCode(voucherInput.trim().toUpperCase());
+        setVoucherDiskon(res.diskon);
+        setVoucherMsg(res.message);
+      } else {
+        setVoucherCode(null);
+        setVoucherDiskon(0);
+        setVoucherMsg(res.message);
+      }
+    },
+    onError: (e) => {
+      setVoucherCode(null);
+      setVoucherDiskon(0);
+      setVoucherMsg(e instanceof ApiError ? e.message : "Gagal memeriksa voucher.");
+    },
+  });
+
+  const removeVoucher = () => {
+    setVoucherCode(null);
+    setVoucherDiskon(0);
+    setVoucherMsg(null);
+    setVoucherInput("");
+  };
 
   const createOrder = useMutation({
     mutationFn: () =>
@@ -98,6 +195,10 @@ export default function CheckoutScreen() {
           items: items.map((i) => ({ product_id: i.product_id, qty: i.qty })),
           kurir,
           ongkir,
+          voucher_code: voucherCode,
+          shipping_coordinate: coord ? { latitude: coord.lat, longitude: coord.lng } : null,
+          courier_company: selRate?.company ?? selRate?.courier_code ?? null,
+          courier_type: selRate?.type ?? null,
         },
       }),
     onSuccess: (order) => {
@@ -108,7 +209,7 @@ export default function CheckoutScreen() {
     onError: (e) => setError(e instanceof ApiError ? e.message : "Gagal membuat pesanan."),
   });
 
-  const total = subtotal + ongkir;
+  const total = Math.max(0, subtotal - voucherDiskon) + ongkir;
 
   return (
     <View style={styles.root}>
@@ -157,11 +258,19 @@ export default function CheckoutScreen() {
           ) : (
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Isi Alamat Pengiriman</Text>
+              <Text style={styles.mapHint}>Geser pin tepat di lokasi rumah/kantor kamu, atau isi alamat lalu ketuk &quot;Cari di Peta&quot; (untuk kurir instant GoSend/Grab).</Text>
               <M3TextField label="Nama Penerima" value={nama} onChangeText={setNama} containerTestID="addr-nama" />
               <M3TextField label="Nomor WhatsApp" keyboardType="phone-pad" value={wa} onChangeText={setWa} containerTestID="addr-wa" />
               <M3TextField label="Alamat Lengkap *" value={alamat} onChangeText={setAlamat} multiline numberOfLines={3} containerTestID="addr-alamat" style={{ minHeight: 70, textAlignVertical: "top" }} />
-              <M3TextField label="Kota *" value={kota} onChangeText={setKota} containerTestID="addr-kota" />
+              <View style={styles.addrRow}>
+                <View style={{ flex: 1 }}>
+                  <M3TextField label="Kota *" value={kota} onChangeText={setKota} containerTestID="addr-kota" />
+                </View>
+                <M3Button testID="search-map" label="Cari di Peta" icon="map-search-outline" variant="tonal" loading={searching} onPress={searchFromAddress} />
+              </View>
               <M3TextField label="Kode Pos" keyboardType="number-pad" value={kodePos} onChangeText={setKodePos} containerTestID="addr-kodepos" />
+              <MapPicker value={coord} onChange={onMapChange} height={260} />
+              {coord ? <Text style={styles.coordText} testID="checkout-coord">📍 {coord.lat.toFixed(6)}, {coord.lng.toFixed(6)}</Text> : null}
               <M3Button
                 testID="save-address"
                 label="Simpan Alamat"
@@ -170,6 +279,10 @@ export default function CheckoutScreen() {
                 onPress={() => {
                   if (!alamat.trim() || !kota.trim()) {
                     setError("Alamat dan kota wajib diisi.");
+                    return;
+                  }
+                  if (!coord) {
+                    setError("Pilih titik lokasi di peta dulu.");
                     return;
                   }
                   saveAddr.mutate();
@@ -181,31 +294,31 @@ export default function CheckoutScreen() {
 
         {step === 2 ? (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Pilih Kurir</Text>
-            {kurirList.map((k) => (
-              <Pressable
-                key={k}
-                testID={`kurir-${k}`}
-                onPress={() => { setKurir(k); setOngkirMsg(null); setOngkir(0); }}
-                style={[styles.kurirRow, kurir === k && styles.kurirRowActive]}
-              >
-                <MaterialDesignIcons
-                  name={kurir === k ? "radiobox-marked" : "radiobox-blank"}
-                  size={22}
-                  color={kurir === k ? colors.brandPrimary : colors.muted}
-                />
-                <Text style={styles.kurirText}>{k}</Text>
-              </Pressable>
-            ))}
+            <Text style={styles.cardTitle}>Pilih Kurir (Biteship)</Text>
             <M3Button
               testID="cek-ongkir"
-              label="Cek Ongkir"
+              label="Cek Ongkir & Kurir"
               icon="truck-fast-outline"
               variant="outlined"
-              disabled={!kurir}
+              disabled={!coord}
               loading={cekOngkir.isPending}
               onPress={() => cekOngkir.mutate()}
             />
+            {!coord ? <Text style={styles.mapHint}>Tentukan titik alamat di langkah sebelumnya dulu.</Text> : null}
+            {rates.map((r, i) => {
+              const label = `${r.courier_name ?? r.company} · ${r.courier_service_name ?? r.type ?? ""}`;
+              const active = selRate === r;
+              return (
+                <Pressable key={i} testID={`rate-${i}`} onPress={() => pickRate(r)} style={[styles.kurirRow, active && styles.kurirRowActive]}>
+                  <MaterialDesignIcons name={active ? "radiobox-marked" : "radiobox-blank"} size={22} color={active ? colors.brandPrimary : colors.muted} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.kurirText}>{label}</Text>
+                    {r.duration ? <Text style={styles.rateDur}>{r.duration}</Text> : null}
+                  </View>
+                  <Text style={styles.ratePrice}>{formatRupiah(r.price ?? 0)}</Text>
+                </Pressable>
+              );
+            })}
             {ongkirMsg ? (
               <View style={styles.ongkirBox} testID="ongkir-msg">
                 <MaterialDesignIcons name="information-outline" size={18} color={colors.onBrandTertiary} />
@@ -237,8 +350,36 @@ export default function CheckoutScreen() {
             </View>
 
             <View style={styles.card}>
+              <View style={styles.cardHeader}>
+                <MaterialDesignIcons name="ticket-percent-outline" size={20} color={colors.brandPrimary} />
+                <Text style={styles.cardTitle}>Voucher Diskon</Text>
+              </View>
+              {voucherCode ? (
+                <View style={styles.voucherApplied} testID="voucher-applied">
+                  <MaterialDesignIcons name="check-circle" size={20} color={colors.success} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.voucherCodeText}>{voucherCode}</Text>
+                    <Text style={styles.voucherSub}>Potongan {formatRupiah(voucherDiskon)}</Text>
+                  </View>
+                  <Pressable testID="voucher-remove" onPress={removeVoucher} hitSlop={8}>
+                    <Text style={styles.linkText}>Hapus</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={styles.voucherRow}>
+                  <View style={{ flex: 1 }}>
+                    <M3TextField label="Kode Voucher" autoCapitalize="characters" value={voucherInput} onChangeText={setVoucherInput} containerTestID="voucher-input" />
+                  </View>
+                  <M3Button testID="voucher-apply" label="Pakai" variant="tonal" loading={applyVoucher.isPending} disabled={!voucherInput.trim()} onPress={() => applyVoucher.mutate()} />
+                </View>
+              )}
+              {voucherMsg && !voucherCode ? <Text style={styles.voucherError} testID="voucher-msg">{voucherMsg}</Text> : null}
+            </View>
+
+            <View style={styles.card}>
               <Text style={styles.cardTitle}>Ringkasan Pembayaran</Text>
               <SummaryRow label="Subtotal" value={formatRupiah(subtotal)} />
+              {voucherDiskon > 0 ? <SummaryRow label={`Diskon Voucher${voucherCode ? ` (${voucherCode})` : ""}`} value={`- ${formatRupiah(voucherDiskon)}`} /> : null}
               <SummaryRow label={`Ongkir${kurir ? ` (${kurir})` : ""}`} value={ongkir > 0 ? formatRupiah(ongkir) : "Dikonfirmasi admin"} />
               <View style={styles.divider} />
               <SummaryRow label="Total" value={formatRupiah(total)} bold />
@@ -322,6 +463,11 @@ const useStyles = makeStyles((colors) => ({
   kurirText: { fontFamily: fonts.bodyMedium, fontSize: 15, color: colors.onSurface },
   ongkirBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.brandTertiary, borderRadius: 12, padding: 12 },
   ongkirText: { flex: 1, fontFamily: fonts.body, fontSize: 13, color: colors.onBrandTertiary, lineHeight: 18 },
+  mapHint: { fontFamily: fonts.body, fontSize: 12, color: colors.muted },
+  coordText: { fontFamily: fonts.body, fontSize: 12, color: colors.brandPrimary },
+  rateDur: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, marginTop: 2 },
+  ratePrice: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.brandPrimary },
+  addrRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   rekRow: { flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: colors.surfaceTertiary, borderRadius: 12, padding: 12 },
   rekBank: { fontFamily: fonts.heading, fontSize: 14, color: colors.brandPrimary, width: 56 },
   rekNo: { fontFamily: fonts.bodyMedium, fontSize: 15, color: colors.onSurface },
@@ -331,6 +477,11 @@ const useStyles = makeStyles((colors) => ({
   summaryValue: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onSurface },
   summaryBold: { fontFamily: fonts.heading, fontSize: 18, color: colors.onSurface },
   divider: { height: 1, backgroundColor: colors.divider },
+  voucherRow: { flexDirection: "row", alignItems: "flex-end", gap: 10 },
+  voucherApplied: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.brandTertiary, borderRadius: 12, padding: 12 },
+  voucherCodeText: { fontFamily: fonts.bodyMedium, fontSize: 15, color: colors.onSurface },
+  voucherSub: { fontFamily: fonts.body, fontSize: 12, color: colors.onSurfaceTertiary, marginTop: 2 },
+  voucherError: { fontFamily: fonts.body, fontSize: 12, color: colors.error },
   footer: {
     position: "absolute",
     left: 0,

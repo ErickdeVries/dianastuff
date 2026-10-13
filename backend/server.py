@@ -147,6 +147,39 @@ class ProductIn(BaseModel):
     berat_gram: int = 0
     bisa_po: bool = False
     foto_urls: List[str] = Field(default_factory=list)
+    location_id: Optional[str] = None
+    harga_diskon: Optional[float] = None  # harga setelah diskon; None/0 = tanpa diskon
+
+
+class LocationIn(BaseModel):
+    name: str
+    contact_name: str
+    contact_phone: str
+    address: str
+    postal_code: str = ""
+    latitude: float
+    longitude: float
+    note: Optional[str] = None
+    is_default: bool = True
+
+
+class UserAddressIn(BaseModel):
+    label_alamat: str = "Rumah"
+    nama_penerima: str
+    telepon: str
+    alamat_lengkap: str
+    postal_code: str = ""
+    latitude: float
+    longitude: float
+    is_default: bool = False
+
+
+class RatesIn(BaseModel):
+    address_id: Optional[str] = None
+    destination_latitude: Optional[float] = None
+    destination_longitude: Optional[float] = None
+    location_id: Optional[str] = None
+    items: List[dict] = Field(default_factory=list)
 
 
 class CustomerIn(BaseModel):
@@ -174,6 +207,8 @@ class AddressUpdate(BaseModel):
     alamat: str
     kota: str
     kode_pos: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 class OrderItemIn(BaseModel):
@@ -186,12 +221,24 @@ class OrderCreate(BaseModel):
     kurir: Optional[str] = None
     ongkir: float = 0
     catatan: Optional[str] = None
+    shipping_coordinate: Optional[dict] = None
+    courier_company: Optional[str] = None
+    courier_type: Optional[str] = None
+    voucher_code: Optional[str] = None
 
 
-class OngkirIn(BaseModel):
-    kota: str
-    kurir: str
-    harga: float = 0
+class VoucherIn(BaseModel):
+    kode: str
+    tipe: str = "persen"          # "persen" | "nominal"
+    nilai: float = 0             # persen (0-100) atau nominal rupiah
+    min_belanja: float = 0       # minimal subtotal agar voucher berlaku
+    kuota: int = 0               # 0 = tak terbatas
+    aktif: bool = True
+    kadaluarsa: Optional[str] = None  # ISO date (YYYY-MM-DD) atau None
+
+
+class PlatformSettingsIn(BaseModel):
+    platform_fee_percent: float = 0  # fee platform (%) dipotong dari pendapatan penjual
 
 
 DEFAULT_KURIR = ["JNE", "J&T", "Lion Parcel", "Gosend Instan/Sameday"]
@@ -223,6 +270,8 @@ def public_user(user: dict) -> dict:
         "alamat": user.get("alamat"),
         "kota": user.get("kota"),
         "kode_pos": user.get("kode_pos"),
+        "latitude": user.get("latitude"),
+        "longitude": user.get("longitude"),
         "status": user.get("status", "approved"),
         "auth_provider": user.get("auth_provider", "whitelist"),
         "picture": user.get("picture"),
@@ -267,23 +316,385 @@ async def require_admin(authorization: Optional[str] = Header(None)) -> dict:
     return user
 
 
-def product_public(p: dict) -> dict:
+def _effective_price(p: dict) -> float:
+    """Discounted price when a valid harga_diskon is set, else the normal price."""
+    harga = p.get("harga", 0) or 0
+    hd = p.get("harga_diskon")
+    if hd is not None and hd > 0 and hd < harga:
+        return hd
+    return harga
+
+
+def product_public(p: dict, terjual: int = 0) -> dict:
+    harga = p.get("harga", 0) or 0
+    harga_final = _effective_price(p)
+    diskon_aktif = harga_final < harga
     return {
         "id": p.get("id"),
         "kategori": p.get("kategori", ""),
         "nama_produk": p.get("nama_produk"),
         "deskripsi": p.get("deskripsi", ""),
-        "harga": p.get("harga", 0),
+        "harga": harga,
+        "harga_diskon": p.get("harga_diskon") if diskon_aktif else None,
+        "harga_final": harga_final,
+        "diskon_persen": round((1 - harga_final / harga) * 100) if diskon_aktif and harga else 0,
         "stok": p.get("stok", 0),
         "berat_gram": p.get("berat_gram", 0),
         "bisa_po": p.get("bisa_po", False),
         "foto_urls": p.get("foto_urls", []),
+        "location_id": p.get("location_id"),
+        "weight": p.get("berat_gram", 0),
+        "terjual": terjual,
+        "views": p.get("views", 0),
         "created_at": p.get("created_at").isoformat() if p.get("created_at") else None,
     }
 
 
+async def _sold_map(product_ids: Optional[List[str]] = None) -> dict:
+    """Units sold per product, counted from completed ('selesai') orders only."""
+    match: dict = {"deleted_at": None, "status": "selesai"}
+    pipeline = [
+        {"$match": match},
+        {"$unwind": "$items"},
+        {"$group": {"_id": "$items.product_id", "qty": {"$sum": "$items.qty"}}},
+    ]
+    if product_ids:
+        pipeline.insert(2, {"$match": {"items.product_id": {"$in": product_ids}}})
+    rows = await db.orders.aggregate(pipeline).to_list(5000)
+    return {r["_id"]: r["qty"] for r in rows}
+
+
 # ---------------------------------------------------------------------------
-# Routes
+# Biteship shipping (multi-tenant ready) — key stays server-side only
+# ---------------------------------------------------------------------------
+BITESHIP_API_KEY = os.environ.get("BITESHIP_API_KEY", "")
+BITESHIP_BASE = "https://api.biteship.com"
+DEFAULT_TENANT = "diana"
+
+
+async def _biteship(method: str, path: str, json_body: Optional[dict] = None) -> dict:
+    if not BITESHIP_API_KEY:
+        raise HTTPException(status_code=503, detail="Biteship belum dikonfigurasi")
+    async with httpx.AsyncClient(
+        base_url=BITESHIP_BASE,
+        timeout=httpx.Timeout(25.0),
+        headers={"Authorization": BITESHIP_API_KEY, "Content-Type": "application/json"},
+    ) as c:
+        r = await c.request(method, path, json=json_body)
+    try:
+        data = r.json()
+    except Exception:
+        data = {"raw": r.text[:300]}
+    if r.status_code >= 400 or (isinstance(data, dict) and data.get("success") is False):
+        detail = data.get("error") or data.get("message") or str(data)[:300]
+        # Use 402 (not 5xx) so the edge CDN doesn't replace our JSON with an
+        # HTML "Bad gateway" page — the frontend needs to read `detail`.
+        raise HTTPException(status_code=402, detail=f"Biteship: {detail}")
+    return data
+
+
+def location_public(d: dict) -> dict:
+    return {
+        "id": d.get("id"),
+        "tenant_id": d.get("tenant_id", DEFAULT_TENANT),
+        "name": d.get("name"),
+        "contact_name": d.get("contact_name"),
+        "contact_phone": d.get("contact_phone"),
+        "address": d.get("address"),
+        "postal_code": d.get("postal_code", ""),
+        "latitude": d.get("latitude"),
+        "longitude": d.get("longitude"),
+        "note": d.get("note"),
+        "is_default": d.get("is_default", False),
+        "biteship_location_id": d.get("biteship_location_id"),
+    }
+
+
+def address_public(d: dict) -> dict:
+    return {
+        "id": d.get("id"),
+        "label_alamat": d.get("label_alamat", "Rumah"),
+        "nama_penerima": d.get("nama_penerima"),
+        "telepon": d.get("telepon"),
+        "alamat_lengkap": d.get("alamat_lengkap"),
+        "postal_code": d.get("postal_code", ""),
+        "latitude": d.get("latitude"),
+        "longitude": d.get("longitude"),
+        "is_default": d.get("is_default", False),
+    }
+
+
+async def _default_location(tenant_id: str = DEFAULT_TENANT) -> Optional[dict]:
+    loc = await db.locations.find_one({"tenant_id": tenant_id, "is_default": True}, {"_id": 0})
+    if not loc:
+        loc = await db.locations.find_one({"tenant_id": tenant_id}, {"_id": 0})
+    return loc
+
+
+async def _sync_biteship_location(doc: dict) -> Optional[str]:
+    payload = {
+        "name": doc["name"],
+        "contact_name": doc["contact_name"],
+        "contact_phone": doc["contact_phone"],
+        "address": doc["address"],
+        "postal_code": doc.get("postal_code") or "",
+        "latitude": doc["latitude"],
+        "longitude": doc["longitude"],
+        "type": "origin",
+    }
+    if doc.get("note"):
+        payload["note"] = doc["note"]
+    try:
+        if doc.get("biteship_location_id"):
+            data = await _biteship("POST", f"/v1/locations/{doc['biteship_location_id']}", payload)
+        else:
+            data = await _biteship("POST", "/v1/locations", payload)
+        return data.get("id") or doc.get("biteship_location_id")
+    except HTTPException as e:
+        logger.warning(f"Biteship location sync failed: {e.detail}")
+        return doc.get("biteship_location_id")
+
+
+@api_router.get("/admin/locations")
+async def list_locations(admin: dict = Depends(require_admin)):
+    docs = await db.locations.find({"tenant_id": DEFAULT_TENANT}, {"_id": 0}).sort("is_default", -1).to_list(50)
+    return [location_public(d) for d in docs]
+
+
+@api_router.post("/admin/locations")
+async def create_location(payload: LocationIn, admin: dict = Depends(require_admin)):
+    doc = {
+        "id": f"loc_{uuid.uuid4().hex[:12]}",
+        "tenant_id": DEFAULT_TENANT,
+        **payload.dict(),
+    }
+    if payload.is_default:
+        await db.locations.update_many({"tenant_id": DEFAULT_TENANT}, {"$set": {"is_default": False}})
+    doc["biteship_location_id"] = await _sync_biteship_location(doc)
+    await db.locations.insert_one(dict(doc))
+    return location_public(doc)
+
+
+@api_router.put("/admin/locations/{location_id}")
+async def update_location(location_id: str, payload: LocationIn, admin: dict = Depends(require_admin)):
+    existing = await db.locations.find_one({"id": location_id, "tenant_id": DEFAULT_TENANT})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Lokasi tidak ditemukan")
+    if payload.is_default:
+        await db.locations.update_many({"tenant_id": DEFAULT_TENANT}, {"$set": {"is_default": False}})
+    merged = {**existing, **payload.dict()}
+    merged["biteship_location_id"] = await _sync_biteship_location(merged)
+    await db.locations.update_one({"id": location_id}, {"$set": {**payload.dict(), "biteship_location_id": merged["biteship_location_id"]}})
+    doc = await db.locations.find_one({"id": location_id}, {"_id": 0})
+    return location_public(doc)
+
+
+@api_router.get("/me/addresses")
+async def list_my_addresses(user: dict = Depends(get_current_user)):
+    docs = await db.user_addresses.find({"user_id": user["user_id"]}, {"_id": 0}).sort("is_default", -1).to_list(50)
+    return [address_public(d) for d in docs]
+
+
+@api_router.post("/me/addresses")
+async def create_my_address(payload: UserAddressIn, user: dict = Depends(get_current_user)):
+    doc = {
+        "id": f"addr_{uuid.uuid4().hex[:12]}",
+        "user_id": user["user_id"],
+        "tenant_id": DEFAULT_TENANT,
+        **payload.dict(),
+    }
+    count = await db.user_addresses.count_documents({"user_id": user["user_id"]})
+    if payload.is_default or count == 0:
+        await db.user_addresses.update_many({"user_id": user["user_id"]}, {"$set": {"is_default": False}})
+        doc["is_default"] = True
+    await db.user_addresses.insert_one(dict(doc))
+    return address_public(doc)
+
+
+@api_router.put("/me/addresses/{address_id}")
+async def update_my_address(address_id: str, payload: UserAddressIn, user: dict = Depends(get_current_user)):
+    existing = await db.user_addresses.find_one({"id": address_id, "user_id": user["user_id"]})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Alamat tidak ditemukan")
+    if payload.is_default:
+        await db.user_addresses.update_many({"user_id": user["user_id"]}, {"$set": {"is_default": False}})
+    await db.user_addresses.update_one({"id": address_id}, {"$set": payload.dict()})
+    doc = await db.user_addresses.find_one({"id": address_id}, {"_id": 0})
+    return address_public(doc)
+
+
+@api_router.delete("/me/addresses/{address_id}")
+async def delete_my_address(address_id: str, user: dict = Depends(get_current_user)):
+    res = await db.user_addresses.delete_one({"id": address_id, "user_id": user["user_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Alamat tidak ditemukan")
+    return {"ok": True}
+
+
+@api_router.post("/shipping/rates")
+async def shipping_rates(payload: RatesIn, user: dict = Depends(get_current_user)):
+    # Origin: product location (future multi-origin) or tenant default location.
+    origin = None
+    if payload.location_id:
+        origin = await db.locations.find_one({"id": payload.location_id}, {"_id": 0})
+    if not origin:
+        origin = await _default_location()
+    if not origin or origin.get("latitude") is None:
+        raise HTTPException(status_code=400, detail="Alamat toko (asal) belum diatur")
+    # Destination: a saved address or raw coords.
+    dlat, dlng = payload.destination_latitude, payload.destination_longitude
+    if payload.address_id:
+        addr = await db.user_addresses.find_one({"id": payload.address_id, "user_id": user["user_id"]}, {"_id": 0})
+        if not addr:
+            raise HTTPException(status_code=404, detail="Alamat tidak ditemukan")
+        dlat, dlng = addr["latitude"], addr["longitude"]
+    if dlat is None or dlng is None:
+        raise HTTPException(status_code=400, detail="Titik lokasi tujuan belum dipilih")
+    items = payload.items or [{"name": "Barang", "value": 10000, "length": 10, "width": 10, "height": 10, "weight": 500, "quantity": 1}]
+    body = {
+        "origin_latitude": origin["latitude"],
+        "origin_longitude": origin["longitude"],
+        "destination_latitude": dlat,
+        "destination_longitude": dlng,
+        "couriers": "gojek,grab,jne,jnt,lion,lalamove,ninja,paxel",
+        "items": items,
+    }
+    data = await _biteship("POST", "/v1/rates/couriers", body)
+    return {"pricing": data.get("pricing", []), "origin": data.get("origin"), "destination": data.get("destination")}
+
+
+class ShipOrderIn(BaseModel):
+    courier_company: str
+    courier_type: str
+
+
+async def _create_biteship_shipment(order: dict, courier_company: Optional[str] = None, courier_type: Optional[str] = None) -> dict:
+    """Book a Biteship shipment for an order. Returns Biteship order data.
+    Raises HTTPException if store origin / destination coordinate missing."""
+    origin = await _default_location()
+    if not origin:
+        raise HTTPException(status_code=400, detail="Alamat toko belum diatur")
+    dest = order.get("shipping_coordinate") or {}
+    if not dest.get("latitude"):
+        raise HTTPException(status_code=400, detail="Koordinat alamat pembeli tidak ada")
+    alamat = order.get("alamat") or {}
+    items = [
+        {
+            "name": it.get("nama_produk") or "Produk",
+            "value": int(it.get("harga") or 0),
+            "length": 15, "width": 15, "height": 10,
+            "weight": int(it.get("weight") or it.get("berat_gram") or 500),
+            "quantity": int(it.get("qty") or 1),
+        }
+        for it in (order.get("items") or [])
+    ] or [{"name": "Pesanan", "value": int(order.get("subtotal") or 10000), "length": 10, "width": 10, "height": 10, "weight": 500, "quantity": 1}]
+    body = {
+        "reference_id": order.get("no_order") or order.get("id"),
+        "shipper_contact_name": origin["contact_name"],
+        "shipper_contact_phone": origin["contact_phone"],
+        "origin_contact_name": origin["contact_name"],
+        "origin_contact_phone": origin["contact_phone"],
+        "origin_address": origin["address"],
+        "origin_coordinate": {"latitude": origin["latitude"], "longitude": origin["longitude"]},
+        "destination_contact_name": alamat.get("nama") or "Penerima",
+        "destination_contact_phone": alamat.get("wa") or "",
+        "destination_address": alamat.get("alamat") or "",
+        "destination_coordinate": {"latitude": dest["latitude"], "longitude": dest["longitude"]},
+        "courier_company": courier_company or order.get("courier_company"),
+        "courier_type": courier_type or order.get("courier_type"),
+        "delivery_type": "now",
+        "items": items,
+    }
+    data = await _biteship("POST", "/v1/orders", body)
+    courier = data.get("courier") or {}
+    await db.orders.update_one(
+        {"id": order["id"]},
+        {"$set": {
+            "biteship_order_id": data.get("id"),
+            "biteship_waybill": courier.get("waybill_id"),
+            "biteship_tracking_id": courier.get("tracking_id") or data.get("id"),
+        }},
+    )
+    return data
+
+
+@api_router.post("/admin/orders/{order_id}/ship")
+async def ship_order(order_id: str, payload: ShipOrderIn, admin: dict = Depends(require_admin)):
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
+    data = await _create_biteship_shipment(order, payload.courier_company, payload.courier_type)
+    return {"ok": True, "biteship_order_id": data.get("id"), "courier": data.get("courier")}
+
+
+@api_router.get("/orders/{order_id}/track")
+async def track_order(order_id: str, user: dict = Depends(get_current_user)):
+    order = await db.orders.find_one({"id": order_id, "deleted_at": None}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
+    if user.get("role") != "admin" and order.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    tid = order.get("biteship_tracking_id")
+    if not tid:
+        # Non-Biteship (manual resi) order — no live tracking available.
+        return {"tracked": False, "status": order.get("status"), "waybill": order.get("no_resi"), "history": []}
+    data = await _biteship("GET", f"/v1/trackings/{tid}")
+    history = [
+        {"status": h.get("status"), "note": h.get("note"), "updated_at": h.get("updated_at"), "service_type": h.get("service_type")}
+        for h in (data.get("history") or [])
+    ]
+    return {
+        "tracked": True,
+        "status": data.get("status"),
+        "waybill": data.get("waybill_id") or order.get("biteship_waybill"),
+        "courier": data.get("courier"),
+        "link": data.get("link"),
+        "history": history,
+    }
+
+
+@api_router.post("/biteship/webhook")
+async def biteship_webhook(request: Request):
+    """Receive Biteship courier status updates. Keeps the order's resi/status
+    in sync and auto-marks delivered orders as selesai."""
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": True}
+    oid = body.get("order_id") or body.get("id")
+    ref = body.get("reference_id")
+    status = (body.get("status") or body.get("courier_status") or "").lower()
+    query = {"biteship_order_id": oid} if oid else ({"no_order": ref} if ref else None)
+    if not query:
+        return {"ok": True}
+    order = await db.orders.find_one(query, {"_id": 0})
+    if not order:
+        return {"ok": True}
+    waybill = body.get("courier_waybill_id") or body.get("waybill_id")
+    sets: dict = {}
+    if waybill:
+        sets["biteship_waybill"] = waybill
+        sets["no_resi"] = waybill
+    sets["biteship_last_status"] = status
+    ops: dict = {"$set": sets}
+    if status == "delivered" and order.get("status") == "dikirim":
+        sets["status"] = "selesai"
+        ops["$push"] = {"status_history": {"status": "selesai", "at": datetime.now(timezone.utc)}}
+    elif status == "cancelled" and order.get("status") in ("dikirim", "sedang_dikemas"):
+        sets["status"] = "dibatalkan"
+        ops["$push"] = {"status_history": {"status": "dibatalkan", "at": datetime.now(timezone.utc)}}
+    await db.orders.update_one({"id": order["id"]}, ops)
+    await sio.emit(
+        "order_status",
+        {"id": order.get("id"), "no_order": order.get("no_order"), "status": sets.get("status", order.get("status")), "no_resi": sets.get("no_resi") or order.get("no_resi")},
+        room=order.get("user_id"),
+    )
+    return {"ok": True}
+
+
+
+
+
 # ---------------------------------------------------------------------------
 @api_router.get("/")
 async def root():
@@ -667,6 +1078,20 @@ async def download_app_apk():
     )
 
 
+@api_router.api_route("/download/backup.zip", methods=["GET", "HEAD"])
+async def download_backup_bundle():
+    zip_path = ROOT_DIR / "static_downloads" / "backup.zip"
+    if not zip_path.exists():
+        raise HTTPException(status_code=404, detail="Backup belum tersedia")
+    return FileResponse(
+        path=str(zip_path),
+        filename="dianastuff-backup.zip",
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="dianastuff-backup.zip"'},
+    )
+
+
+
 # ---------------------------------------------------------------------------
 # Products (public read; admin write)
 # ---------------------------------------------------------------------------
@@ -679,7 +1104,8 @@ async def list_products(search: Optional[str] = None):
             {"kategori": {"$regex": search, "$options": "i"}},
         ]
     docs = await db.products.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return [product_public(d) for d in docs]
+    sold = await _sold_map([d.get("id") for d in docs])
+    return [product_public(d, sold.get(d.get("id"), 0)) for d in docs]
 
 
 @api_router.get("/products/{product_id}")
@@ -687,7 +1113,38 @@ async def get_product(product_id: str):
     doc = await db.products.find_one({"id": product_id, "deleted_at": None}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Produk tidak ditemukan")
-    return product_public(doc)
+    sold = await _sold_map([product_id])
+    return product_public(doc, sold.get(product_id, 0))
+
+
+async def _user_from_bearer(authorization: Optional[str]) -> Optional[dict]:
+    """Resolve the logged-in user from a Bearer token, or None for guests."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+    if not session:
+        return None
+    return await db.users.find_one({"user_id": session["user_id"], "deleted_at": None}, {"_id": 0})
+
+
+@api_router.post("/products/{product_id}/view")
+async def track_product_view(product_id: str, authorization: Optional[str] = Header(None)):
+    """Record a storefront product view (buyers & guests). Powers the
+    'Dilihat X' counter and the seller visitor analytics."""
+    doc = await db.products.find_one({"id": product_id, "deleted_at": None}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Produk tidak ditemukan")
+    user = await _user_from_bearer(authorization)
+    await db.products.update_one({"id": product_id}, {"$inc": {"views": 1}})
+    await db.product_views.insert_one({
+        "product_id": product_id,
+        "product_nama": doc.get("nama_produk"),
+        "user_id": user.get("user_id") if user else None,
+        "viewer_name": (user.get("nama") or user.get("username")) if user else "Tamu",
+        "at": datetime.now(timezone.utc),
+    })
+    return {"ok": True, "views": doc.get("views", 0) + 1}
 
 
 # ---------------------------------------------------------------------------
@@ -1358,6 +1815,8 @@ def order_public(o: dict) -> dict:
         "user_id": o.get("user_id"),
         "items": o.get("items", []),
         "subtotal": o.get("subtotal", 0),
+        "voucher_code": o.get("voucher_code"),
+        "voucher_diskon": o.get("voucher_diskon", 0),
         "ongkir": o.get("ongkir", 0),
         "total": o.get("total", 0),
         "status": o.get("status"),
@@ -1365,6 +1824,12 @@ def order_public(o: dict) -> dict:
         "alamat": o.get("alamat"),
         "kurir": o.get("kurir"),
         "catatan": o.get("catatan"),
+        "shipping_coordinate": o.get("shipping_coordinate"),
+        "courier_company": o.get("courier_company"),
+        "courier_type": o.get("courier_type"),
+        "biteship_order_id": o.get("biteship_order_id"),
+        "biteship_waybill": o.get("biteship_waybill"),
+        "biteship_tracking_id": o.get("biteship_tracking_id"),
         "bukti_bayar_url": o.get("bukti_bayar_url"),
         "review": o.get("review"),
         "status_history": [
@@ -1390,96 +1855,133 @@ async def update_me(payload: AddressUpdate, user: dict = Depends(get_current_use
         update["nama"] = payload.nama.strip()
     if payload.wa:
         update["wa"] = payload.wa.strip()
+    if payload.latitude is not None:
+        update["latitude"] = payload.latitude
+    if payload.longitude is not None:
+        update["longitude"] = payload.longitude
     await db.users.update_one({"user_id": user["user_id"]}, {"$set": update})
     doc = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
     return public_user(doc)
 
 
-@api_router.get("/ongkir")
-async def cek_ongkir(kota: str, kurir: str, user: dict = Depends(get_current_user)):
-    row = await db.ongkir_manual.find_one(
-        {"kota": {"$regex": f"^{re.escape(kota.strip())}$", "$options": "i"}, "kurir": kurir},
-        {"_id": 0},
-    )
-    if not row:
-        return {"found": False, "harga": None}
-    return {"found": True, "harga": row.get("harga", 0)}
-
-
 # ---------------------------------------------------------------------------
-# Admin: manual shipping cost (ongkir) management
+# Vouchers / discount codes
 # ---------------------------------------------------------------------------
-def ongkir_public(o: dict) -> dict:
+def voucher_public(v: dict) -> dict:
     return {
-        "id": o.get("id"),
-        "kota": o.get("kota", ""),
-        "kurir": o.get("kurir", ""),
-        "harga": o.get("harga", 0),
+        "id": v.get("id"),
+        "kode": v.get("kode", ""),
+        "tipe": v.get("tipe", "persen"),
+        "nilai": v.get("nilai", 0),
+        "min_belanja": v.get("min_belanja", 0),
+        "kuota": v.get("kuota", 0),
+        "terpakai": v.get("terpakai", 0),
+        "aktif": v.get("aktif", True),
+        "kadaluarsa": v.get("kadaluarsa"),
     }
 
 
-@api_router.get("/admin/ongkir")
-async def list_ongkir(admin: dict = Depends(require_admin)):
-    docs = await db.ongkir_manual.find({}, {"_id": 0}).sort([("kota", 1), ("kurir", 1)]).to_list(1000)
-    return [ongkir_public(d) for d in docs]
+def _voucher_check(v: Optional[dict], subtotal: float) -> tuple:
+    """Return (diskon, error_message). diskon=0 with message when invalid."""
+    if not v:
+        return 0.0, "Kode voucher tidak ditemukan"
+    if not v.get("aktif", True):
+        return 0.0, "Voucher tidak aktif"
+    if v.get("kadaluarsa"):
+        try:
+            exp = datetime.fromisoformat(str(v["kadaluarsa"]))
+            if exp.date() < datetime.now(timezone(timedelta(hours=7))).date():
+                return 0.0, "Voucher sudah kadaluarsa"
+        except Exception:
+            pass
+    kuota = v.get("kuota", 0) or 0
+    if kuota and v.get("terpakai", 0) >= kuota:
+        return 0.0, "Kuota voucher sudah habis"
+    if subtotal < (v.get("min_belanja", 0) or 0):
+        return 0.0, f"Minimal belanja Rp {int(v.get('min_belanja', 0)):,} untuk voucher ini".replace(",", ".")
+    if v.get("tipe") == "nominal":
+        diskon = min(float(v.get("nilai", 0) or 0), subtotal)
+    else:
+        diskon = subtotal * float(v.get("nilai", 0) or 0) / 100.0
+    return round(diskon), ""
 
 
-@api_router.post("/admin/ongkir")
-async def create_ongkir(payload: OngkirIn, admin: dict = Depends(require_admin)):
-    kota = payload.kota.strip()
-    kurir = payload.kurir.strip()
-    if not kota or not kurir:
-        raise HTTPException(status_code=400, detail="Kota dan kurir wajib diisi")
-    if payload.harga < 0:
-        raise HTTPException(status_code=400, detail="Harga tidak valid")
-    existing = await db.ongkir_manual.find_one(
-        {"kota": {"$regex": f"^{re.escape(kota)}$", "$options": "i"}, "kurir": kurir}
-    )
-    if existing:
-        raise HTTPException(status_code=409, detail="Tarif untuk kota & kurir ini sudah ada")
+@api_router.post("/voucher/validate")
+async def validate_voucher(payload: dict, user: dict = Depends(get_current_user)):
+    kode = (payload.get("kode") or "").strip().upper()
+    subtotal = float(payload.get("subtotal", 0) or 0)
+    v = await db.vouchers.find_one({"kode": kode}, {"_id": 0})
+    diskon, msg = _voucher_check(v, subtotal)
+    if msg:
+        return {"valid": False, "diskon": 0, "message": msg}
+    return {"valid": True, "diskon": diskon, "voucher": voucher_public(v), "message": "Voucher diterapkan"}
+
+
+@api_router.get("/admin/vouchers")
+async def list_vouchers(admin: dict = Depends(require_admin)):
+    docs = await db.vouchers.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [voucher_public(d) for d in docs]
+
+
+@api_router.post("/admin/vouchers")
+async def create_voucher(payload: VoucherIn, admin: dict = Depends(require_admin)):
+    kode = payload.kode.strip().upper()
+    if not kode:
+        raise HTTPException(status_code=400, detail="Kode voucher wajib diisi")
+    if payload.tipe not in ("persen", "nominal"):
+        raise HTTPException(status_code=400, detail="Tipe voucher tidak valid")
+    if payload.nilai <= 0:
+        raise HTTPException(status_code=400, detail="Nilai diskon harus lebih dari 0")
+    if payload.tipe == "persen" and payload.nilai > 100:
+        raise HTTPException(status_code=400, detail="Diskon persen maksimal 100")
+    if await db.vouchers.find_one({"kode": kode}):
+        raise HTTPException(status_code=409, detail="Kode voucher sudah ada")
     doc = {
-        "id": f"ongkir_{uuid.uuid4().hex[:12]}",
-        "kota": kota,
-        "kurir": kurir,
-        "harga": payload.harga,
+        "id": f"vcr_{uuid.uuid4().hex[:12]}",
+        "kode": kode,
+        "tipe": payload.tipe,
+        "nilai": payload.nilai,
+        "min_belanja": max(0.0, payload.min_belanja),
+        "kuota": max(0, payload.kuota),
+        "aktif": payload.aktif,
+        "kadaluarsa": payload.kadaluarsa or None,
+        "terpakai": 0,
         "created_at": datetime.now(timezone.utc),
     }
-    await db.ongkir_manual.insert_one(doc)
-    return ongkir_public(doc)
+    await db.vouchers.insert_one(doc)
+    return voucher_public(doc)
 
 
-@api_router.put("/admin/ongkir/{ongkir_id}")
-async def update_ongkir(ongkir_id: str, payload: OngkirIn, admin: dict = Depends(require_admin)):
-    existing = await db.ongkir_manual.find_one({"id": ongkir_id})
+@api_router.put("/admin/vouchers/{voucher_id}")
+async def update_voucher(voucher_id: str, payload: VoucherIn, admin: dict = Depends(require_admin)):
+    existing = await db.vouchers.find_one({"id": voucher_id})
     if not existing:
-        raise HTTPException(status_code=404, detail="Tarif tidak ditemukan")
-    kota = payload.kota.strip()
-    kurir = payload.kurir.strip()
-    if not kota or not kurir:
-        raise HTTPException(status_code=400, detail="Kota dan kurir wajib diisi")
-    if payload.harga < 0:
-        raise HTTPException(status_code=400, detail="Harga tidak valid")
-    dup = await db.ongkir_manual.find_one({
-        "id": {"$ne": ongkir_id},
-        "kota": {"$regex": f"^{re.escape(kota)}$", "$options": "i"},
-        "kurir": kurir,
-    })
+        raise HTTPException(status_code=404, detail="Voucher tidak ditemukan")
+    kode = payload.kode.strip().upper()
+    if not kode:
+        raise HTTPException(status_code=400, detail="Kode voucher wajib diisi")
+    dup = await db.vouchers.find_one({"id": {"$ne": voucher_id}, "kode": kode})
     if dup:
-        raise HTTPException(status_code=409, detail="Tarif untuk kota & kurir ini sudah ada")
-    await db.ongkir_manual.update_one(
-        {"id": ongkir_id},
-        {"$set": {"kota": kota, "kurir": kurir, "harga": payload.harga}},
-    )
-    doc = await db.ongkir_manual.find_one({"id": ongkir_id}, {"_id": 0})
-    return ongkir_public(doc)
+        raise HTTPException(status_code=409, detail="Kode voucher sudah ada")
+    await db.vouchers.update_one({"id": voucher_id}, {"$set": {
+        "kode": kode,
+        "tipe": payload.tipe,
+        "nilai": payload.nilai,
+        "min_belanja": max(0.0, payload.min_belanja),
+        "kuota": max(0, payload.kuota),
+        "aktif": payload.aktif,
+        "kadaluarsa": payload.kadaluarsa or None,
+    }})
+    doc = await db.vouchers.find_one({"id": voucher_id}, {"_id": 0})
+    return voucher_public(doc)
 
 
-@api_router.delete("/admin/ongkir/{ongkir_id}")
-async def delete_ongkir(ongkir_id: str, admin: dict = Depends(require_admin)):
-    res = await db.ongkir_manual.delete_one({"id": ongkir_id})
+@api_router.delete("/admin/vouchers/{voucher_id}")
+async def delete_voucher(voucher_id: str, admin: dict = Depends(require_admin)):
+    res = await db.vouchers.delete_one({"id": voucher_id})
     if res.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Tarif tidak ditemukan")
-    return {"message": "Tarif dihapus"}
+        raise HTTPException(status_code=404, detail="Voucher tidak ditemukan")
+    return {"message": "Voucher dihapus"}
 
 
 @api_router.post("/orders")
@@ -1500,12 +2002,14 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
             raise HTTPException(status_code=404, detail="Produk tidak ditemukan")
         if not product.get("bisa_po") and product.get("stok", 0) < it.qty:
             raise HTTPException(status_code=400, detail=f"Stok {product['nama_produk']} tidak cukup")
-        line = product.get("harga", 0) * it.qty
+        unit = _effective_price(product)
+        line = unit * it.qty
         subtotal += line
         order_items.append({
             "product_id": it.product_id,
             "nama_produk": product.get("nama_produk"),
-            "harga": product.get("harga", 0),
+            "harga": unit,
+            "harga_asli": product.get("harga", 0),
             "qty": it.qty,
             "foto": (product.get("foto_urls") or [None])[0],
             "subtotal": line,
@@ -1518,8 +2022,21 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
     for it in order_items:
         await db.products.update_one({"id": it["product_id"]}, {"$inc": {"stok": -it["qty"]}})
 
+    # Apply voucher (server-side validated so the discount can't be forged).
+    voucher_code = None
+    voucher_diskon = 0.0
+    if payload.voucher_code:
+        kode = payload.voucher_code.strip().upper()
+        v = await db.vouchers.find_one({"kode": kode})
+        diskon, msg = _voucher_check(v, subtotal)
+        if msg:
+            raise HTTPException(status_code=400, detail=msg)
+        voucher_code = kode
+        voucher_diskon = diskon
+        await db.vouchers.update_one({"id": v["id"]}, {"$inc": {"terpakai": 1}})
+
     ongkir = max(0.0, payload.ongkir or 0)
-    total = subtotal + ongkir
+    total = max(0.0, subtotal - voucher_diskon) + ongkir
     now = datetime.now(timezone.utc)
     no_order = f"DS-{now.strftime('%y%m%d')}-{secrets.token_hex(2).upper()}"
 
@@ -1529,6 +2046,8 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
         "user_id": user["user_id"],
         "items": order_items,
         "subtotal": subtotal,
+        "voucher_code": voucher_code,
+        "voucher_diskon": voucher_diskon,
         "ongkir": ongkir,
         "total": total,
         "status": "menunggu_pembayaran",
@@ -1542,6 +2061,9 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
         },
         "kurir": payload.kurir,
         "catatan": payload.catatan,
+        "shipping_coordinate": payload.shipping_coordinate,
+        "courier_company": payload.courier_company,
+        "courier_type": payload.courier_type,
         "bukti_bayar_url": None,
         "created_at": now,
         "deleted_at": None,
@@ -1684,10 +2206,21 @@ async def update_order_status(order_id: str, body: dict, admin: dict = Depends(r
         raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
     update: dict = {"status": status}
     if status == "dikirim":
-        no_resi = (body or {}).get("no_resi")
-        if not no_resi or not str(no_resi).strip():
-            raise HTTPException(status_code=400, detail="No resi wajib diisi")
-        update["no_resi"] = str(no_resi).strip()
+        already_booked = bool(doc.get("biteship_order_id"))
+        is_biteship = bool(doc.get("courier_company") and (doc.get("shipping_coordinate") or {}).get("latitude"))
+        if is_biteship and not already_booked:
+            # Auto-book the courier the buyer picked at checkout; waybill becomes the resi.
+            try:
+                data = await _create_biteship_shipment(doc)
+                courier = data.get("courier") or {}
+                update["no_resi"] = courier.get("waybill_id") or data.get("id")
+            except HTTPException as e:
+                raise HTTPException(status_code=e.status_code, detail=f"Gagal booking kurir: {e.detail}")
+        else:
+            no_resi = (body or {}).get("no_resi") or doc.get("biteship_waybill") or doc.get("no_resi")
+            if not no_resi or not str(no_resi).strip():
+                raise HTTPException(status_code=400, detail="No resi wajib diisi")
+            update["no_resi"] = str(no_resi).strip()
         # Timestamp used by the auto-complete sweep.
         if doc.get("status") != "dikirim":
             update["dikirim_at"] = datetime.now(timezone.utc)
@@ -1877,6 +2410,107 @@ async def admin_stats(admin: dict = Depends(require_admin)):
     }
 
 
+# ---------------------------------------------------------------------------
+# Platform settings (fee %) — adjustable by superadmin later (multi-tenant)
+# ---------------------------------------------------------------------------
+async def _platform_fee_percent() -> float:
+    doc = await db.platform_settings.find_one({"_id": "current"})
+    return float((doc or {}).get("platform_fee_percent", 0) or 0)
+
+
+@api_router.get("/admin/platform-settings")
+async def get_platform_settings(admin: dict = Depends(require_admin)):
+    return {"platform_fee_percent": await _platform_fee_percent()}
+
+
+@api_router.put("/admin/platform-settings")
+async def set_platform_settings(payload: PlatformSettingsIn, admin: dict = Depends(require_admin)):
+    fee = max(0.0, min(100.0, payload.platform_fee_percent))
+    await db.platform_settings.update_one(
+        {"_id": "current"}, {"$set": {"platform_fee_percent": fee}}, upsert=True
+    )
+    return {"platform_fee_percent": fee}
+
+
+# ---------------------------------------------------------------------------
+# Seller analytics — visitors, auto sales recap, best sellers
+# ---------------------------------------------------------------------------
+@api_router.get("/admin/analytics")
+async def admin_analytics(admin: dict = Depends(require_admin)):
+    # Completed sales recap (only "selesai" orders count as real sales).
+    sold_pipeline = [
+        {"$match": {"deleted_at": None, "status": "selesai"}},
+        {"$group": {
+            "_id": None,
+            "orders": {"$sum": 1},
+            "units": {"$sum": {"$sum": "$items.qty"}},
+            "subtotal": {"$sum": "$subtotal"},
+            "voucher": {"$sum": {"$ifNull": ["$voucher_diskon", 0]}},
+            "ongkir": {"$sum": "$ongkir"},
+            "total": {"$sum": "$total"},
+        }},
+    ]
+    agg = await db.orders.aggregate(sold_pipeline).to_list(1)
+    s = agg[0] if agg else {}
+    barang_net = float(s.get("subtotal", 0) or 0) - float(s.get("voucher", 0) or 0)
+    fee_percent = await _platform_fee_percent()
+    platform_fee = round(barang_net * fee_percent / 100.0)
+    pendapatan_bersih = round(barang_net - platform_fee)
+
+    # Best sellers (by units, completed orders).
+    top_pipeline = [
+        {"$match": {"deleted_at": None, "status": "selesai"}},
+        {"$unwind": "$items"},
+        {"$group": {
+            "_id": "$items.product_id",
+            "nama": {"$first": "$items.nama_produk"},
+            "foto": {"$first": "$items.foto"},
+            "qty": {"$sum": "$items.qty"},
+            "omzet": {"$sum": "$items.subtotal"},
+        }},
+        {"$sort": {"qty": -1}},
+        {"$limit": 10},
+    ]
+    top_rows = await db.orders.aggregate(top_pipeline).to_list(10)
+    produk_terlaris = [
+        {"product_id": r["_id"], "nama": r.get("nama"), "foto": r.get("foto"),
+         "terjual": r.get("qty", 0), "omzet": r.get("omzet", 0)}
+        for r in top_rows
+    ]
+
+    # Visitors: total views + distinct logged-in visitors + recent viewers list.
+    total_views = 0
+    vp = await db.products.aggregate([
+        {"$match": {"deleted_at": None}},
+        {"$group": {"_id": None, "v": {"$sum": {"$ifNull": ["$views", 0]}}}},
+    ]).to_list(1)
+    if vp:
+        total_views = vp[0].get("v", 0)
+    pengunjung_login = len(await db.product_views.distinct("user_id", {"user_id": {"$ne": None}}))
+    recent_rows = await db.product_views.find({}, {"_id": 0}).sort("at", -1).limit(30).to_list(30)
+    pengunjung_terbaru = [
+        {"viewer_name": r.get("viewer_name") or "Tamu", "produk": r.get("product_nama"),
+         "login": bool(r.get("user_id")),
+         "at": r["at"].isoformat() if r.get("at") else None}
+        for r in recent_rows
+    ]
+
+    return {
+        "pesanan_selesai": s.get("orders", 0) or 0,
+        "unit_terjual": s.get("units", 0) or 0,
+        "pendapatan_kotor": round(float(s.get("total", 0) or 0)),
+        "ongkir_total": round(float(s.get("ongkir", 0) or 0)),
+        "voucher_total": round(float(s.get("voucher", 0) or 0)),
+        "platform_fee_percent": fee_percent,
+        "platform_fee": platform_fee,
+        "pendapatan_bersih": pendapatan_bersih,
+        "produk_terlaris": produk_terlaris,
+        "total_dilihat": total_views,
+        "pengunjung_login": pengunjung_login,
+        "pengunjung_terbaru": pengunjung_terbaru,
+    }
+
+
 
 # ---------------------------------------------------------------------------
 # Startup: indexes + seed data
@@ -1898,7 +2532,31 @@ async def on_startup():
     await db.products.create_index("id", unique=True)
     await db.orders.create_index("id", unique=True)
     await db.orders.create_index("user_id")
-    await db.ongkir_manual.create_index([("kota", 1), ("kurir", 1)])
+    await db.locations.create_index("id", unique=True)
+    await db.user_addresses.create_index("id", unique=True)
+    await db.user_addresses.create_index("user_id")
+    await db.vouchers.create_index("kode", unique=True)
+    await db.vouchers.create_index("id", unique=True)
+    await db.product_views.create_index("product_id")
+    await db.product_views.create_index([("at", -1)])
+    # Seed one default store Location (multi-tenant ready; single-origin for now).
+    if not await db.locations.find_one({"tenant_id": DEFAULT_TENANT}):
+        profil = await db.profil_admin.find_one({}) or {}
+        await db.locations.insert_one({
+            "id": f"loc_{uuid.uuid4().hex[:12]}",
+            "tenant_id": DEFAULT_TENANT,
+            "name": profil.get("nama_toko") or "Diana Stuff",
+            "contact_name": profil.get("nama_toko") or "Diana Stuff",
+            "contact_phone": DEFAULT_WHATSAPP,
+            "address": "Jl. Contoh No. 1, Jakarta",
+            "postal_code": "10110",
+            "latitude": -6.2,
+            "longitude": 106.816666,
+            "note": "Alamat default — ubah di Pengaturan Alamat Toko",
+            "is_default": True,
+            "biteship_location_id": None,
+        })
+        logger.info("Seeded default store location")
 
     # Seed store profile with sample data so the app works out of the box.
     if not await db.profil_admin.find_one({}):
@@ -2009,20 +2667,6 @@ async def on_startup():
             s["deleted_at"] = None
         await db.products.insert_many(samples)
         logger.info("Seeded sample products")
-
-    # Seed sample manual shipping rates (only when empty) so checkout works.
-    if await db.ongkir_manual.count_documents({}) == 0:
-        ongkir_samples = [
-            {"kota": "Jakarta", "kurir": "JNE", "harga": 12000},
-            {"kota": "Jakarta", "kurir": "J&T", "harga": 11000},
-            {"kota": "Bandung", "kurir": "JNE", "harga": 15000},
-            {"kota": "Surabaya", "kurir": "JNE", "harga": 20000},
-        ]
-        for o in ongkir_samples:
-            o["id"] = f"ongkir_{uuid.uuid4().hex[:12]}"
-            o["created_at"] = datetime.now(timezone.utc)
-        await db.ongkir_manual.insert_many(ongkir_samples)
-        logger.info("Seeded sample ongkir_manual")
 
 
 

@@ -13,11 +13,13 @@ type Item = { name: string; label: string; icon: string };
 
 const ITEMS: Item[] = [
   { name: "index", label: "Dashboard", icon: "view-dashboard-outline" },
+  { name: "analitik", label: "Analitik Toko", icon: "chart-line" },
   { name: "live", label: "Live Shopping", icon: "access-point" },
   { name: "live-rekap", label: "Rekap Live", icon: "chart-box-outline" },
   { name: "produk", label: "Produk", icon: "tag-outline" },
+  { name: "voucher", label: "Voucher Diskon", icon: "ticket-percent-outline" },
   { name: "pesanan", label: "Pesanan", icon: "receipt-text-outline" },
-  { name: "ongkir", label: "Ongkir Manual", icon: "truck-outline" },
+  { name: "alamat-toko", label: "Alamat Toko", icon: "map-marker-radius-outline" },
   { name: "pelanggan", label: "Pelanggan", icon: "account-group-outline" },
   { name: "profil", label: "Pengaturan Toko", icon: "store-cog-outline" },
   { name: "sandi", label: "Kata Sandi", icon: "shield-key-outline" },
@@ -127,11 +129,12 @@ export default function DashboardLayout() {
       }}
     >
       <Drawer.Screen name="index" options={{ title: "Dashboard" }} />
+      <Drawer.Screen name="analitik" options={{ title: "Analitik Toko" }} />
       <Drawer.Screen name="live" options={{ title: "Live Shopping" }} />
       <Drawer.Screen name="live-rekap" options={{ title: "Rekap Live" }} />
       <Drawer.Screen name="produk" options={{ title: "Produk" }} />
+      <Drawer.Screen name="voucher" options={{ title: "Voucher Diskon" }} />
       <Drawer.Screen name="pesanan" options={{ title: "Pesanan" }} />
-      <Drawer.Screen name="ongkir" options={{ title: "Ongkir Manual" }} />
       <Drawer.Screen name="pelanggan" options={{ title: "Pelanggan" }} />
       <Drawer.Screen name="profil" options={{ title: "Pengaturan Toko" }} />
       <Drawer.Screen name="sandi" options={{ title: "Ubah Kata Sandi" }} />

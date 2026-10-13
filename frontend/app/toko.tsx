@@ -18,6 +18,11 @@ type Product = {
   kategori: string;
   nama_produk: string;
   harga: number;
+  harga_diskon?: number | null;
+  harga_final: number;
+  diskon_persen: number;
+  terjual: number;
+  views: number;
   stok: number;
   bisa_po: boolean;
   foto_urls: string[];
@@ -80,10 +85,21 @@ export default function TokoScreen() {
             </View>
           )}
           {item.bisa_po ? <Text style={styles.poBadge}>PO</Text> : null}
+          {item.diskon_persen > 0 ? <Text style={styles.discBadge}>-{item.diskon_persen}%</Text> : null}
         </View>
         <Text style={styles.name} numberOfLines={2}>{item.nama_produk}</Text>
-        <Text style={styles.price}>{formatRupiah(item.harga)}</Text>
-        <Text style={styles.stock}>Stok {item.stok}</Text>
+        {item.diskon_persen > 0 ? (
+          <View style={styles.priceRow}>
+            <Text style={styles.price}>{formatRupiah(item.harga_final)}</Text>
+            <Text style={styles.priceStrike}>{formatRupiah(item.harga)}</Text>
+          </View>
+        ) : (
+          <Text style={styles.price}>{formatRupiah(item.harga_final)}</Text>
+        )}
+        <View style={styles.soldRow}>
+          <Text style={styles.sold}>Terjual {item.terjual}</Text>
+          <Text style={styles.sold}>· Dilihat {item.views}</Text>
+        </View>
       </Pressable>
     );
   };
@@ -272,8 +288,24 @@ const useStyles = makeStyles((colors) => ({
     overflow: "hidden",
   },
   name: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onSurface, marginTop: 4, paddingHorizontal: 4 },
+  priceRow: { flexDirection: "row", alignItems: "baseline", gap: 6, paddingHorizontal: 4, flexWrap: "wrap" },
   price: { fontFamily: fonts.heading, fontSize: 15, color: colors.brandPrimary, paddingHorizontal: 4 },
-  stock: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, paddingHorizontal: 4, paddingBottom: 4 },
+  priceStrike: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, textDecorationLine: "line-through" },
+  discBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    fontFamily: fonts.bodyMedium,
+    fontSize: 10,
+    color: "#fff",
+    backgroundColor: colors.error,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  soldRow: { flexDirection: "row", gap: 4, paddingHorizontal: 4, paddingBottom: 4, flexWrap: "wrap" },
+  sold: { fontFamily: fonts.body, fontSize: 11, color: colors.muted },
   empty: { alignItems: "center", gap: 8, paddingVertical: 80 },
   emptyText: { fontFamily: fonts.body, fontSize: 15, color: colors.muted },
 }));

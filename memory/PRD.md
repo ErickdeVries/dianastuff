@@ -350,7 +350,53 @@ Inter body. Language: Indonesian.
   ulang iter26: reaction tamu kini MUNCUL juga di layar host (live_react ke room live+admins).
 - Fix host visibility butuh APK BARU (build lama belum memuat perbaikan socket).
 
-## Implemented (2026-06 fork — Riwayat versi foto AI + sapaan otomatis live), iter30
+## Implemented (2026-10 — Kurir×Pembayaran end-to-end + Lacak Resi + GPS + Google Maps), iter32
+- INTEGRASI KURIR↔PEMBAYARAN MANUAL (mulus): checkout(pilih kurir Biteship dari koordinat) →
+  bayar manual (upload bukti → menunggu_konfirmasi) → admin sedang_dikemas → admin "Kirim" (dikirim):
+  bila order punya courier_company + shipping_coordinate & belum dibooking, backend OTOMATIS
+  booking Biteship (`_create_biteship_shipment`), waybill jadi no_resi (tanpa input manual). Order
+  non-Biteship tetap pakai input resi manual (fallback). Lanjut: buyer "Pesanan Diterima" / auto-
+  complete setelah N hari di 'dikirim' / webhook delivered → selesai.
+- LACAK RESI OTOMATIS: GET /api/orders/{id}/track (owner/admin) tarik Biteship /v1/trackings/{id};
+  POST /api/biteship/webhook sinkron status+resi, delivered→selesai. Halaman pesanan pembeli
+  (order/[id].tsx) tampil kartu "Lacak Paket" (status + riwayat kurir, refetch 60s).
+- GOOGLE MAPS (ganti OSM): map-html.ts pakai Google Maps JS + Places Autocomplete + Geocoder
+  reverse. Key client `GOOGLE_MAPS_KEY` di map-html.ts (restrictions: None + API Maps JS/Geocoding/
+  Places). utils/geocode.ts pakai Google Geocoding. Alamat Indonesia kini akurat. Dua arah:
+  form→peta (Cari di Peta) & peta→form (isi alamat).
+- TOMBOL GPS "Lokasi Saya" di peta (navigator.geolocation). WebView native `geolocationEnabled`,
+  iframe web `allow="geolocation"`. app.json: +NSLocationWhenInUseUsageDescription, +ACCESS_FINE/
+  COARSE_LOCATION.
+- order_public expose biteship_order_id/waybill/tracking_id. OrderCreate simpan shipping_coordinate/
+  courier_company/type (dari checkout).
+- Diverifikasi end-to-end (sandbox key, saldo terisi): order→dikirim auto-book (waybill WYB-..., 
+  tracking status 'confirmed')→halaman pembeli tampil Lacak Paket. Rates butuh saldo (sudah top-up).
+- CATATAN: key Biteship kini SANDBOX (biteship_test); Google key belum dibatasi referrer (todo user).
+## Implemented (2026-10 fork — Integrasi Biteship + Peta Pinpoint, multi-tenant ready), iter31
+- Integrasi Biteship (key LIVE di env `BITESHIP_API_KEY`, server-side only). Ongkir manual DIGANTI
+  kurir dinamis berbasis koordinat GPS. Helper `_biteship()` (httpx, header Authorization) — error
+  Biteship di-raise sebagai HTTP 402 (bukan 5xx) supaya JSON detail lolos dari CDN ke frontend.
+- Skema (semua ber-`tenant_id`, default "diana", siap multi-tenant):
+  - `locations` (toko/gudang asal): id, name, contact_name/phone, address, postal_code, latitude,
+    longitude, is_default, biteship_location_id. Seed 1 lokasi default saat startup.
+  - `user_addresses` (alamat pembeli): id, user_id, label_alamat, nama_penerima, telepon,
+    alamat_lengkap, postal_code, latitude, longitude, is_default.
+  - `products`: tambah `location_id` + expose `weight` (=berat_gram). `users`: + latitude/longitude.
+- Endpoint: GET/POST/PUT /api/admin/locations (sinkron ke Biteship Locations → simpan
+  biteship_location_id, terverifikasi jalan tanpa saldo); GET/POST/PUT/DELETE /api/me/addresses;
+  POST /api/shipping/rates (origin default + destinasi koordinat/address_id + items → Biteship
+  /v1/rates/couriers); POST /api/admin/orders/{id}/ship (buat order Biteship dgn origin+destination
+  coordinate). create_order simpan shipping_coordinate/courier_company/courier_type; order_public
+  expose field tsb + biteship_order_id/waybill.
+- Peta interaktif **Google Maps** (map-html.ts + map-picker.tsx native WebView & map-picker.web.tsx iframe; srcDoc, key client-side `GOOGLE_MAPS_KEY` di map-html.ts, Application restrictions=None, API restrictions: Maps JS+Geocoding+Places). Places Autocomplete untuk cari alamat, Geocoder reverse saat pin digeser. Binding dua arah: form→peta via `utils/geocode.ts` (Google Geocoding), peta→form mengisi kolom alamat otomatis. (Sebelumnya OSM/Leaflet — diganti karena reverse-geocode OSM tidak akurat untuk alamat Indonesia). Dipakai di:
+  - Admin `/dashboard/alamat-toko` (drawer "Alamat Toko", gantikan "Ongkir Manual"): form + peta →
+    simpan + sinkron Biteship.
+  - Checkout `/checkout` step 1: pinpoint peta + alamat (simpan lat/lng ke /api/me); step 2:
+    "Cek Ongkir & Kurir" → daftar kurir dinamis dari Biteship, pilih → ongkir + courier_company/type.
+- CATATAN: akun Biteship LIVE saat ini TANPA SALDO → Rates & Orders balas 402 "No sufficient
+  balance" (integrasi benar, tinggal TOP-UP saldo Biteship). Locations tidak butuh saldo.
+- Diverifikasi iter31: backend 20 pass (CRUD, seed, sync lokasi real, security key tidak bocor,
+  validasi), frontend web (peta Leaflet iframe tampil + pin/search di alamat-toko & checkout).
 - RIWAYAT AI (kembalikan foto): tiap slot foto di /product-form menyimpan riwayat versi
   (`PhotoItem{versions[],idx}`). Enhance AI menambah versi baru; tombol undo/redo (↩/↪) di bawah
   thumbnail untuk maju-mundur antar versi ("Asli"→v1→v2...). Yang tersimpan = versi aktif tiap foto.
@@ -386,7 +432,7 @@ Inter body. Language: Indonesian.
   gate nama, transkrip, regresi produk & live semua lolos.
 - web.zip di-rebuild (backend produksi + fitur live REST terbaru) di /api/download/web.zip.
 
-## Implemented (2026-06 fork — Live realtime migrasi ke MongoDB + REST polling), iter27
+## Implemented (2026-06 fork — Riwayat versi foto AI + sapaan otomatis live), iter30
 - MASALAH: produksi jalan multi-worker → state Socket.io in-memory (LIVE_STATS/LIVE_CHAT_BUFFER/
   LIVE_VIEWERS/LIVE_PINNED/LIVE_MUTED/LIVE_KICKED) terpecah antar worker → chat penonton web tidak
   sampai ke host APK. Semua handler Socket.io LIVE dihapus (connect/join/message untuk chat toko &
@@ -408,3 +454,35 @@ Inter body. Language: Indonesian.
   moderasi mute/kick E2E, pin, react); viewer web (chat kirim/terima via polling, emoji, featured,
   strip produk, badge penonton). Socket.io chat toko + notifikasi order tetap jalan (regresi aman).
   Kamera host tetap hanya aktif di build HP asli (Agora).
+
+## Implemented (2026-06 fork — Analitik toko, etalase Shopee, voucher), iter33/34
+- BERSIH-BERSIH KURIR MANUAL: hapus total sisa `ongkir_manual` (GET /api/ongkir, GET/POST/PUT/DELETE
+  /api/admin/ongkir, model OngkirIn, index, seed, layar /dashboard/ongkir, entri drawer). Checkout
+  murni pakai Biteship /api/shipping/rates. (user minta dibersihkan — konfirmasi A. YA)
+- DISKON PER-PRODUK: ProductIn + product_public tambah `harga_diskon`; serializer kirim `harga_final`,
+  `diskon_persen`, `harga_diskon`, `terjual` (dari _sold_map, HANYA order status 'selesai'), `views`.
+  create_order pakai _effective_price (harga diskon) utk subtotal. Form admin: field "Harga Diskon
+  (opsional)" + hint persen + validasi < harga normal. Etalase & detail: harga normal DICORET + badge
+  -X% (gaya Shopee).
+- VIEW TRACKING: POST /api/products/{id}/view (login & tamu). increment products.views + log
+  product_views (viewer_name = nama/username atau "Tamu"). Detail produk panggil saat dibuka. Etalase
+  & detail tampil "Terjual X · Dilihat Y".
+- VOUCHER: GET/POST/PUT/DELETE /api/admin/vouchers; POST /api/voucher/validate; create_order terima
+  voucher_code (validasi server-side, kurangi kuota). Tipe persen/nominal, min_belanja, kuota,
+  kadaluarsa, aktif. Layar admin /dashboard/voucher (list+FAB+modal+hapus). Checkout step 3: kartu
+  Voucher (input→Pakai), ringkasan "Diskon Voucher", total dikurangi. Keduanya (per-produk + kode).
+- ANALITIK: GET /api/admin/analytics (rekap HANYA 'selesai': unit_terjual, pendapatan_kotor,
+  ongkir_total, voucher_total, platform_fee, pendapatan_bersih = barang_net - fee; produk_terlaris;
+  total_dilihat; pengunjung_login; pengunjung_terbaru). GET/PUT /api/admin/platform-settings
+  (platform_fee_percent, default 0 — siap diatur superadmin saat multi-tenant). Layar
+  /dashboard/analitik + entri drawer + shortcut dashboard.
+- Diverifikasi: backend 20/20 pytest (iter33), frontend 7/7 flow (iter34). Tidak ada bug.
+- BITESHIP GO-LIVE: berhasil buat Test Order di mode testing end-to-end (rates→order→tracking).
+  - Test Order DELIVERED: ID 6ac010bc5337db2c3cdbf645 (JNE reg, resi WYB-1790972092131,
+    internal 7fc4fbceeb544976a38ac7c6f1a60de9, status dikirim).
+  - Test Order CANCELLED: ID 6ac0141342e8e965677a966f (J&T ez, resi WYB-1790972947446).
+  - Simulasi status (delivered/cancelled) dilakukan user di dashboard Biteship (Testing Mode →
+    Pengiriman → Update Status). Form aktivasi: dashboard.biteship.com/integrations.
+  - Daftar kurir cek ongkir disesuaikan pilihan user: gojek,grab,jne,jnt,lion,lalamove,ninja,paxel.
+  - Webhook biteship kini juga menangani status "cancelled" → order jadi 'dibatalkan'.
+  - Setelah disetujui → ganti BITESHIP_API_KEY (.env) dari biteship_test ke biteship_live, restart.
