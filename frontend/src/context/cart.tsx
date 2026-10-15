@@ -14,15 +14,23 @@ export type CartItem = {
   qty: number;
   stok: number;
   bisa_po: boolean;
+  variation_key?: string | null;
+  variation_label?: string | null;
+  weight?: number; // berat per unit (gram) untuk hitung ongkir
 };
+
+// A cart line is unique per product + chosen variation.
+export function cartLineId(i: { product_id: string; variation_key?: string | null }): string {
+  return `${i.product_id}::${i.variation_key ?? ""}`;
+}
 
 type CartContextValue = {
   items: CartItem[];
   count: number;
   subtotal: number;
   addItem: (item: Omit<CartItem, "qty">, qty?: number) => void;
-  setQty: (productId: string, qty: number) => void;
-  removeItem: (productId: string) => void;
+  setQty: (lineId: string, qty: number) => void;
+  removeItem: (lineId: string) => void;
   clear: () => void;
 };
 
@@ -46,26 +54,27 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const addItem: CartContextValue["addItem"] = (item, qty = 1) => {
     setItems((prev) => {
-      const existing = prev.find((p) => p.product_id === item.product_id);
+      const id = cartLineId(item);
+      const existing = prev.find((p) => cartLineId(p) === id);
       if (existing) {
         return prev.map((p) =>
-          p.product_id === item.product_id ? { ...p, qty: p.qty + qty } : p,
+          cartLineId(p) === id ? { ...p, qty: p.qty + qty } : p,
         );
       }
       return [...prev, { ...item, qty }];
     });
   };
 
-  const setQty: CartContextValue["setQty"] = (productId, qty) => {
+  const setQty: CartContextValue["setQty"] = (lineId, qty) => {
     setItems((prev) =>
       qty <= 0
-        ? prev.filter((p) => p.product_id !== productId)
-        : prev.map((p) => (p.product_id === productId ? { ...p, qty } : p)),
+        ? prev.filter((p) => cartLineId(p) !== lineId)
+        : prev.map((p) => (cartLineId(p) === lineId ? { ...p, qty } : p)),
     );
   };
 
-  const removeItem = (productId: string) =>
-    setItems((prev) => prev.filter((p) => p.product_id !== productId));
+  const removeItem = (lineId: string) =>
+    setItems((prev) => prev.filter((p) => cartLineId(p) !== lineId));
 
   const clear = () => setItems([]);
 

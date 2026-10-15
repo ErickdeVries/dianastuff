@@ -18,7 +18,9 @@ const ITEMS: Item[] = [
   { name: "live-rekap", label: "Rekap Live", icon: "chart-box-outline" },
   { name: "produk", label: "Produk", icon: "tag-outline" },
   { name: "voucher", label: "Voucher Diskon", icon: "ticket-percent-outline" },
+  { name: "promo", label: "Broadcast Promo", icon: "bullhorn-outline" },
   { name: "pesanan", label: "Pesanan", icon: "receipt-text-outline" },
+  { name: "ongkir", label: "Ongkos Kirim", icon: "truck-fast-outline" },
   { name: "alamat-toko", label: "Alamat Toko", icon: "map-marker-radius-outline" },
   { name: "pelanggan", label: "Pelanggan", icon: "account-group-outline" },
   { name: "profil", label: "Pengaturan Toko", icon: "store-cog-outline" },
@@ -134,7 +136,9 @@ export default function DashboardLayout() {
       <Drawer.Screen name="live-rekap" options={{ title: "Rekap Live" }} />
       <Drawer.Screen name="produk" options={{ title: "Produk" }} />
       <Drawer.Screen name="voucher" options={{ title: "Voucher Diskon" }} />
+      <Drawer.Screen name="promo" options={{ title: "Broadcast Promo" }} />
       <Drawer.Screen name="pesanan" options={{ title: "Pesanan" }} />
+      <Drawer.Screen name="ongkir" options={{ title: "Ongkos Kirim" }} />
       <Drawer.Screen name="pelanggan" options={{ title: "Pelanggan" }} />
       <Drawer.Screen name="profil" options={{ title: "Pengaturan Toko" }} />
       <Drawer.Screen name="sandi" options={{ title: "Ubah Kata Sandi" }} />

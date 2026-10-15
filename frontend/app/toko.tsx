@@ -20,9 +20,13 @@ type Product = {
   harga: number;
   harga_diskon?: number | null;
   harga_final: number;
+  harga_max?: number;
   diskon_persen: number;
+  has_variations?: boolean;
   terjual: number;
   views: number;
+  rating?: number;
+  rating_count?: number;
   stok: number;
   bisa_po: boolean;
   foto_urls: string[];
@@ -88,7 +92,13 @@ export default function TokoScreen() {
           {item.diskon_persen > 0 ? <Text style={styles.discBadge}>-{item.diskon_persen}%</Text> : null}
         </View>
         <Text style={styles.name} numberOfLines={2}>{item.nama_produk}</Text>
-        {item.diskon_persen > 0 ? (
+        {item.has_variations ? (
+          <Text style={styles.price}>
+            {item.harga_max && item.harga_max > item.harga_final
+              ? `${formatRupiah(item.harga_final)} - ${formatRupiah(item.harga_max)}`
+              : formatRupiah(item.harga_final)}
+          </Text>
+        ) : item.diskon_persen > 0 ? (
           <View style={styles.priceRow}>
             <Text style={styles.price}>{formatRupiah(item.harga_final)}</Text>
             <Text style={styles.priceStrike}>{formatRupiah(item.harga)}</Text>
@@ -97,7 +107,15 @@ export default function TokoScreen() {
           <Text style={styles.price}>{formatRupiah(item.harga_final)}</Text>
         )}
         <View style={styles.soldRow}>
-          <Text style={styles.sold}>Terjual {item.terjual}</Text>
+          {item.rating_count ? (
+            <View style={styles.ratingInline}>
+              <MaterialDesignIcons name="star" size={12} color={colors.warning} />
+              <Text style={styles.sold}>{item.rating?.toFixed(1)}</Text>
+              <Text style={styles.sold}>· Terjual {item.terjual}</Text>
+            </View>
+          ) : (
+            <Text style={styles.sold}>Terjual {item.terjual}</Text>
+          )}
           <Text style={styles.sold}>· Dilihat {item.views}</Text>
         </View>
       </Pressable>
@@ -305,6 +323,7 @@ const useStyles = makeStyles((colors) => ({
     overflow: "hidden",
   },
   soldRow: { flexDirection: "row", gap: 4, paddingHorizontal: 4, paddingBottom: 4, flexWrap: "wrap" },
+  ratingInline: { flexDirection: "row", alignItems: "center", gap: 3 },
   sold: { fontFamily: fonts.body, fontSize: 11, color: colors.muted },
   empty: { alignItems: "center", gap: 8, paddingVertical: 80 },
   emptyText: { fontFamily: fonts.body, fontSize: 15, color: colors.muted },

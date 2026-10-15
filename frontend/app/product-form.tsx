@@ -11,6 +11,7 @@ import { apiRequest, ApiError } from "@/src/api/client";
 import { pickAndUploadImages } from "@/src/api/uploads";
 import { M3Button } from "@/src/components/m3-button";
 import { M3TextField } from "@/src/components/m3-text-field";
+import { Combo, VarGroup, VariationEditor } from "@/src/components/variation-editor";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { resolveImageUrl } from "@/src/utils/image";
 
@@ -31,6 +32,9 @@ type Product = {
   berat_gram: number;
   bisa_po: boolean;
   foto_urls: string[];
+  has_variations?: boolean;
+  variations?: VarGroup[];
+  combinations?: Combo[];
 };
 
 export default function ProductForm() {
@@ -57,6 +61,9 @@ export default function ProductForm() {
   const [berat, setBerat] = useState("");
   const [bisaPo, setBisaPo] = useState(false);
   const [fotos, setFotos] = useState<PhotoItem[]>([]);
+  const [hasVariations, setHasVariations] = useState(false);
+  const [variations, setVariations] = useState<VarGroup[]>([]);
+  const [combinations, setCombinations] = useState<Combo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -74,6 +81,11 @@ export default function ProductForm() {
       setBerat(String(data.berat_gram ?? ""));
       setBisaPo(!!data.bisa_po);
       setFotos((data.foto_urls ?? []).map((u) => ({ versions: [u], idx: 0 })));
+      if (data.has_variations && data.variations?.length) {
+        setHasVariations(true);
+        setVariations(data.variations);
+        setCombinations(data.combinations ?? []);
+      }
     }
   }, [data]);
 
@@ -166,9 +178,20 @@ export default function ProductForm() {
       return;
     }
     const hd = hargaDiskon.trim() ? parseFloat(hargaDiskon) || 0 : 0;
-    if (hd > 0 && hd >= (parseFloat(harga) || 0)) {
+    if (!hasVariations && hd > 0 && hd >= (parseFloat(harga) || 0)) {
       setError("Harga diskon harus lebih kecil dari harga normal.");
       return;
+    }
+    const validGroups = variations.filter((g) => g.name.trim() && g.options.length > 0);
+    if (hasVariations) {
+      if (validGroups.length === 0) {
+        setError("Tambahkan minimal 1 variasi dengan opsi, atau matikan Variasi.");
+        return;
+      }
+      if (combinations.some((c) => (c.harga || 0) <= 0)) {
+        setError("Isi harga untuk semua kombinasi variasi.");
+        return;
+      }
     }
     setSaving(true);
     try {
@@ -176,12 +199,15 @@ export default function ProductForm() {
         kategori: kategori.trim(),
         nama_produk: nama.trim(),
         deskripsi: deskripsi.trim(),
-        harga: parseFloat(harga) || 0,
-        harga_diskon: hargaDiskon.trim() ? parseFloat(hargaDiskon) || 0 : null,
-        stok: parseInt(stok, 10) || 0,
+        harga: hasVariations ? 0 : parseFloat(harga) || 0,
+        harga_diskon: !hasVariations && hargaDiskon.trim() ? parseFloat(hargaDiskon) || 0 : null,
+        stok: hasVariations ? 0 : parseInt(stok, 10) || 0,
         berat_gram: parseInt(berat, 10) || 0,
         bisa_po: bisaPo,
         foto_urls: fotos.map((f) => cur(f)),
+        has_variations: hasVariations && validGroups.length > 0,
+        variations: hasVariations ? validGroups : [],
+        combinations: hasVariations ? combinations : [],
       };
       if (isEdit) {
         await apiRequest(`/api/products/${id}`, { method: "PUT", body });
@@ -279,35 +305,62 @@ export default function ProductForm() {
         <M3TextField label="Nama Produk *" icon="tag-outline" value={nama} onChangeText={setNama} containerTestID="product-nama" />
         <M3TextField label="Deskripsi" placeholder="Deskripsi produk" value={deskripsi} onChangeText={setDeskripsi} multiline numberOfLines={4} containerTestID="product-deskripsi" style={{ minHeight: 90, textAlignVertical: "top" }} />
 
-        <View style={styles.rowFields}>
+        <View style={styles.switchRow}>
           <View style={{ flex: 1 }}>
-            <M3TextField label="Harga (Rp)" keyboardType="number-pad" placeholder="0" value={harga} onChangeText={setHarga} containerTestID="product-harga" />
+            <Text style={styles.switchLabel}>Aktifkan Variasi</Text>
+            <Text style={styles.switchHint}>Mis. Warna & Ukuran — tiap kombinasi punya harga, stok & foto sendiri.</Text>
           </View>
-          <View style={{ flex: 1 }}>
-            <M3TextField label="Stok" keyboardType="number-pad" placeholder="0" value={stok} onChangeText={setStok} containerTestID="product-stok" />
-          </View>
+          <Switch
+            testID="product-has-variations"
+            value={hasVariations}
+            onValueChange={(v) => {
+              setHasVariations(v);
+              if (v && variations.length === 0) setVariations([{ name: "", options: [] }]);
+            }}
+            trackColor={{ true: colors.brandPrimary, false: colors.border }}
+            thumbColor={colors.surfaceSecondary}
+          />
         </View>
 
-        <M3TextField label="Berat (gram)" icon="weight-gram" keyboardType="number-pad" placeholder="0" value={berat} onChangeText={setBerat} containerTestID="product-berat" />
+        {hasVariations ? (
+          <VariationEditor
+            variations={variations}
+            combinations={combinations}
+            onChange={(v, c) => { setVariations(v); setCombinations(c); }}
+          />
+        ) : (
+          <>
+            <View style={styles.rowFields}>
+              <View style={{ flex: 1 }}>
+                <M3TextField label="Harga (Rp)" keyboardType="number-pad" placeholder="0" value={harga} onChangeText={setHarga} containerTestID="product-harga" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <M3TextField label="Stok" keyboardType="number-pad" placeholder="0" value={stok} onChangeText={setStok} containerTestID="product-stok" />
+              </View>
+            </View>
 
-        <M3TextField
-          label="Harga Diskon (opsional)"
-          icon="ticket-percent-outline"
-          keyboardType="number-pad"
-          placeholder="Kosongkan jika tanpa diskon"
-          value={hargaDiskon}
-          onChangeText={setHargaDiskon}
-          containerTestID="product-harga-diskon"
-        />
-        {(() => {
-          const h = parseFloat(harga) || 0;
-          const hd = hargaDiskon.trim() ? parseFloat(hargaDiskon) || 0 : 0;
-          if (hd > 0 && hd < h) {
-            const pct = Math.round((1 - hd / h) * 100);
-            return <Text style={styles.discHint}>Diskon {pct}% — harga normal dicoret di etalase.</Text>;
-          }
-          return <Text style={styles.aiHint}>Isi harga setelah diskon. Harga normal akan tampil dicoret di etalase (gaya Shopee).</Text>;
-        })()}
+            <M3TextField
+              label="Harga Diskon (opsional)"
+              icon="ticket-percent-outline"
+              keyboardType="number-pad"
+              placeholder="Kosongkan jika tanpa diskon"
+              value={hargaDiskon}
+              onChangeText={setHargaDiskon}
+              containerTestID="product-harga-diskon"
+            />
+            {(() => {
+              const h = parseFloat(harga) || 0;
+              const hd = hargaDiskon.trim() ? parseFloat(hargaDiskon) || 0 : 0;
+              if (hd > 0 && hd < h) {
+                const pct = Math.round((1 - hd / h) * 100);
+                return <Text style={styles.discHint}>Diskon {pct}% — harga normal dicoret di etalase.</Text>;
+              }
+              return <Text style={styles.aiHint}>Isi harga setelah diskon. Harga normal akan tampil dicoret di etalase (gaya Shopee).</Text>;
+            })()}
+          </>
+        )}
+
+        <M3TextField label="Berat (gram)" icon="weight-gram" keyboardType="number-pad" placeholder="0" value={berat} onChangeText={setBerat} containerTestID="product-berat" />
 
         <View style={styles.switchRow}>
           <View style={{ flex: 1 }}>

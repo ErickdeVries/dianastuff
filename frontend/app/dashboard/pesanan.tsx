@@ -27,7 +27,13 @@ type Order = {
   items: { nama_produk: string; qty: number }[];
   bukti_bayar_url?: string | null;
   created_at?: string | null;
+  courier_company?: string | null;
+  courier_type?: string | null;
+  shipping_coordinate?: { latitude?: number; longitude?: number } | null;
+  biteship_order_id?: string | null;
 };
+
+const isBiteshipOrder = (o: Order) => !!(o.courier_company && o.shipping_coordinate?.latitude);
 
 export default function AdminPesananScreen() {
   const styles = useStyles();
@@ -38,6 +44,7 @@ export default function AdminPesananScreen() {
 
   const [resiMap, setResiMap] = useState<Record<string, string>>({});
   const [viewBukti, setViewBukti] = useState<string | null>(null);
+  const [payloadOrderId, setPayloadOrderId] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("semua");
 
   const FILTERS: { key: string; label: string }[] = [
@@ -56,6 +63,13 @@ export default function AdminPesananScreen() {
   const { data: profil } = useQuery<Profil>({
     queryKey: ["profil_admin"],
     queryFn: () => apiRequest<Profil>("/api/profil_admin", { auth: false }),
+  });
+
+  // Exact Biteship request payload for an order (for Biteship support tickets).
+  const { data: payloadData, isFetching: payloadLoading } = useQuery<Record<string, any>>({
+    queryKey: ["biteship-payload", payloadOrderId],
+    queryFn: () => apiRequest<Record<string, any>>(`/api/admin/orders/${payloadOrderId}/biteship-payload`),
+    enabled: !!payloadOrderId,
   });
 
   const onPrint = async (item: Order) => {
@@ -124,6 +138,16 @@ export default function AdminPesananScreen() {
 
         {item.no_resi ? <Text style={styles.meta}>Resi{item.kurir ? ` (${item.kurir})` : ""}: {item.no_resi}</Text> : null}
 
+        {item.courier_company ? (
+          <M3Button
+            testID={`payload-${item.id}`}
+            label="Payload Biteship (untuk support)"
+            icon="code-json"
+            variant="outlined"
+            onPress={() => setPayloadOrderId(item.id)}
+          />
+        ) : null}
+
         {item.status === "sedang_dikemas" || item.status === "dikirim" ? (
           <M3Button
             testID={`print-label-${item.id}`}
@@ -156,6 +180,20 @@ export default function AdminPesananScreen() {
         ) : null}
 
         {item.status === "sedang_dikemas" ? (
+          isBiteshipOrder(item) ? (
+            <View style={{ gap: 8 }}>
+              <Text style={styles.meta}>
+                Kurir {item.courier_company}/{item.courier_type} akan di-booking otomatis via Biteship — resi kurir terisi sendiri.
+              </Text>
+              <M3Button
+                testID={`kirim-${item.id}`}
+                label="Kirim via Biteship → Dikirim"
+                icon="truck-fast-outline"
+                variant="filled"
+                onPress={() => statusMut.mutate({ id: item.id, status: "dikirim" })}
+              />
+            </View>
+          ) : (
           <View style={{ gap: 8 }}>
             <TextInput
               testID={`resi-input-${item.id}`}
@@ -177,6 +215,7 @@ export default function AdminPesananScreen() {
               }}
             />
           </View>
+          )
         ) : null}
 
         {item.status === "dikirim" ? (
@@ -254,6 +293,20 @@ export default function AdminPesananScreen() {
           {viewBukti ? <Image source={{ uri: resolveImageUrl(viewBukti) }} style={styles.buktiFull} contentFit="contain" /> : null}
         </Pressable>
       </Modal>
+
+      <Modal visible={!!payloadOrderId} transparent animationType="fade" onRequestClose={() => setPayloadOrderId(null)}>
+        <View style={styles.backdrop}>
+          <View style={styles.payloadCard}>
+            <Text style={styles.payloadTitle}>Payload Biteship — {payloadData?.no_order ?? ""}</Text>
+            <ScrollView style={styles.payloadScroll}>
+              <Text style={styles.payloadText} selectable>
+                {payloadLoading ? "Memuat..." : JSON.stringify(payloadData ?? {}, null, 2)}
+              </Text>
+            </ScrollView>
+            <M3Button label="Tutup" icon="close" variant="tonal" onPress={() => setPayloadOrderId(null)} />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -284,6 +337,18 @@ const useStyles = makeStyles((colors) => ({
     overflow: "hidden",
   },
   meta: { fontFamily: fonts.body, fontSize: 13, color: colors.muted },
+  payloadCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    padding: 16,
+    width: "92%",
+    maxHeight: "80%",
+    gap: 12,
+    alignSelf: "center",
+  },
+  payloadTitle: { fontFamily: fonts.heading, fontSize: 14, color: colors.onSurface },
+  payloadScroll: { flexGrow: 0 },
+  payloadText: { fontFamily: fonts.body, fontSize: 11, color: colors.onSurfaceSecondary },
   produkBox: {
     marginTop: 4,
     gap: 2,

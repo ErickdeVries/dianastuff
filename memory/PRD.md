@@ -486,3 +486,127 @@ Inter body. Language: Indonesian.
   - Daftar kurir cek ongkir disesuaikan pilihan user: gojek,grab,jne,jnt,lion,lalamove,ninja,paxel.
   - Webhook biteship kini juga menangani status "cancelled" → order jadi 'dibatalkan'.
   - Setelah disetujui → ganti BITESHIP_API_KEY (.env) dari biteship_test ke biteship_live, restart.
+## BITESHIP GO-LIVE SELESAI (2026-06 fork)
+- Aktivasi Order API disetujui Biteship; user menyerahkan key biteship_live (Diana stuff_Live).
+- .env di-update ke key live (backup lama: /tmp/.env.bak), backend restart, tes rates LIVE OK
+  (14 layanan: gojek/grab/paxel/jne/jnt/lion/lalamove/ninja). Base URL memang sudah
+  https://api.biteship.com (test/live dibedakan oleh prefix key, bukan URL).
+- PENTING: live = transaksi NYATA. Tombol "Kirim" sekarang mem-booking kurir asli & memotong saldo
+  Biteship. Tracking order lama (test mode) tidak berlaku lagi di live.
+- Tidak perlu APK baru: key server-side, APK v1.0.8 otomatis ikut live. Cloudflare opsional (hanya
+  untuk hosting web custom domain).
+## Rilis & Backup (2026-06 fork)
+- Landing: APK dinaikkan ke v1.0.8 (APK_URL + APK_VERSION di src/components/landing-page.tsx),
+  ditambah banner alert "Update baru v1.0.8" + label versi di tombol unduh. APK lama v1.0.6 diganti.
+- static_downloads: web.zip di-rebuild (expo export web terbaru), app.apk diganti v1.0.8.
+- Endpoint download baru: GET /api/download/backup.zip (full source + BASELINE_AUDIT.md, TANPA .env).
+- /app/BASELINE_AUDIT.md dibuat (ringkasan arsitektur/fitur/endpoint/koleksi DB).
+- GitHub push & Cloudflare deploy = kapabilitas platform (via Save to GitHub / Publish) — diarahkan ke support.
+## Batch besar (iter35): Variasi, Checkout estimasi/asuransi, Ongkir settings, Fix upload
+- FIX UPLOAD FOTO (APK): uploads.ts pakai API ImageManipulator baru (manipulate().renderAsync().saveAsync)
+  pengganti manipulateAsync yang deprecated & bikin kompресi gagal → foto besar ditolak server. Perlu
+  BUILD APK BARU untuk verifikasi di HP (fix ada di kode client).
+- CHECKOUT: rates passthrough duration (estimasi) + available_for_insurance + insurance_fee. UI: chip
+  "Estimasi X", checkbox "Asuransikan paket" (pembeli pilih, +fee ke total), badge subsidi + harga coret.
+  OrderCreate: asuransi + asuransi_fee → total.
+- ONGKIR SETTINGS: store_settings doc {enabled_couriers, subsidy_mode none|discount|free, subsidy_amount}.
+  GET/PUT /api/admin/shipping-settings. /api/shipping/rates filter kurir enabled + apply subsidy
+  (price_asli/price/subsidi). Layar /dashboard/ongkir (toggle kurir + 3 opsi subsidi) + drawer entry.
+- VARIASI PRODUK (gaya Shopee, s/d 2 grup): ProductIn+product_public has_variations/variations/combinations;
+  harga_final=min combo, harga_max, stok=sum. _effective_price & create_order pakai harga combo + decrement
+  stok combo (match combinations.options). OrderItemIn.variation_key. Komponen VariationEditor (grup+opsi+
+  matrix harga/stok/diskon/foto per kombinasi). Detail: selector chip per grup. Etalase: range harga.
+  Cart: line id = product_id::variation_key (variasi beda = baris beda), label variasi di keranjang.
+  Preset nama variasi: Ukuran, Berat, Warna, Volume, Aroma, Ukuran Curling, Jenis Kulit + custom.
+- Diverifikasi: backend 9/9 pytest (iter35) + frontend 100%. Tidak ada bug.
+- CATATAN: perubahan UI (variasi/checkout/ongkir) langsung aktif di web; untuk APK perlu BUILD BARU.
+- FIX ONGKIR: checkout dulu hardcode berat 500g + dimensi 15x15x10 (nambah berat volumetrik). Diubah
+  pakai berat asli produk (CartItem.weight dari product.berat_gram) tanpa dimensi; booking Biteship juga
+  drop dimensi. Uji Jkt->Bdg 250g = JNE REG 12000 (sesuai tarif resmi). Koordinat vs kode pos identik.
+- RILIS v1.0.9: landing APK_URL+APK_VERSION -> 1.0.9, web.zip & app.apk di-rebuild & diganti.
+## Forensik upload bukti bayar + diskon kurir (2026-06 fork)
+- Upload bukti bayar: diverifikasi SUKSES via web preview (login buyer→upload→"Bukti bayar terkirim"),
+  via public ingress 40KB & 4.3MB (HTTP 200), dan via backend PRODUKSI (HTTP 200). Backend sehat total.
+  Perbaikan client: uploadAsset kini wajib token (401 jelas), error jaringan menampilkan alasan asli
+  (bukan pesan generik), 401→"login ulang", 413→"foto terlalu besar". Butuh build APK baru utk diagnosa
+  lanjutan bila masih gagal di device user.
+- Diskon kurir Biteship: API punya field shipping_fee_discount; price = shipping_fee - discount +
+  surcharge. Saat dicek semua rute discount=0 (Biteship tidak sedang promo). Promo di web resmi kurir
+  (mis. MyJNE) TIDAK berlaku via agregator Biteship. Checkout kini menampilkan badge "Diskon kurir" +
+  harga coret otomatis bila shipping_fee_discount > 0.
+- web.zip di-rebuild lagi (memuat perbaikan upload + tampilan diskon kurir).
+## Push Notifications (iter36) — Emergent-managed
+- Backend: POST /api/register-push (relay ke integrations.emergentagent.com, X-Push-Key=EMERGENT_PUSH_KEY),
+  send_push(recipients, data, idem) chunk 100. Chat: _notify_chat dipanggil di chat_send(REST) & socket
+  message → push ke lawan bicara (buyer<->admin). Broadcast: POST/GET /api/admin/broadcast (promo:
+  title/message/image_url/action_url/target all|selected+user_ids), simpan di coll `notifications`
+  (tenant_id=DEFAULT_TENANT, siap multi-tenant). GET /api/notifications (buyer in-app list per tenant).
+  Semua push non-blocking (try/except) — aman saat key masih placeholder.
+- Frontend: src/utils/push.ts registerForPush (native-only, getDevicePushTokenAsync → /register-push) dipanggil
+  di auth context saat user login. useNotificationTap (native-only, guard web) → router.push(action_url) di
+  _layout. Layar admin /dashboard/promo (banner upload + judul/pesan/link preset + target all/pilih pelanggan
+  + riwayat) + drawer "Broadcast Promo". app.json: plugin expo-notifications + android.googleServicesFile.
+- google-services.json user SUDAH ditambahkan (project dianastuff77, package com.dianastuff.app).
+  EMERGENT_PUSH_KEY=placeholder (diisi otomatis saat deploy). CATATAN: push HANYA jalan di BUILD asli
+  (bukan Expo Go/web); perlu Deploy + build baru. expo-notifications & expo-device diinstal via expo install.
+## FIX upload Android "Unsupported FormDataPart implementation" (iter37)
+- Error HP: `Gagal mengunggah foto (jaringan): Unsupported FormDataPart implementation`.
+- Akar masalah: release build SDK 54+ memakai WinterCG fetch; FormData-nya MENOLAK part legacy RN
+  `{uri,name,type}` (jalan di Expo Go/web, gagal di APK). BUKAN masalah LLM key — upload produksi
+  via curl TERUJI 200; APK v1.0.11 juga sudah memuat fix manipulator + modul native lengkap.
+- FIX uploads.ts: native kini `form.append("file", new File(uri))` (expo-file-system SDK 57,
+  File implements Blob; dukung file:// & content://). Web tetap Blob. Var `type` dihapus (unused).
+- WAJIB build APK baru (v1.0.12) — fix murni client-side. Sekalian upload Google Service Account
+  JSON saat generate build agar push juga hidup.
+- APK v1.0.11 disematkan ke landing + web.zip di-rebuild (prod 4x, 0 preview leak).
+## Rilis v1.0.12 + FIX deep-link notif cold-start (iter37 lanjutan)
+- BUG: notif chat penjual→pembeli, tap saat app mati (cold start) masuk ke /toko, bukan /chat.
+  Akar: race — gate auth `_layout.tsx` melakukan router.replace("/toko") yang menimpa push("/chat")
+  dari handler cold-start getLastNotificationResponseAsync.
+- FIX: push.ts ekspor getColdStartActionUrl() (dedupe per identifier, konsumsi 1x); useNotificationTap
+  kini HANYA warm listener. Gate: saat `user && !root` cek dulu cold-start url → replace ke sana,
+  fallback /toko|/home. Perlu APK/build baru (client-side).
+- APK v1.0.12 diunduh dari Google Drive user → static_downloads/app.apk. Landing APK_URL kini menunjuk
+  endpoint sendiri https://diana-store-2.emergent.host/api/download/app.apk (terbukti tersinkron ke
+  produksi saat Publish) + APK_VERSION 1.0.12. web.zip di-rebuild.
+- APK v1.0.13 (Drive user) menggantikan app.apk; landing APK_VERSION -> 1.0.13; web.zip di-rebuild lagi.
+## Fitur baru (2026-10, iter37): kurir POS, voucher ongkir %, review bintang
+- Kurir POS Indonesia ditambah ke ALL_COURIERS + label COURIER_LABELS (ongkir.tsx). Kurir instan
+  (gojek/grab/lalamove) sudah ada sebelumnya.
+- Voucher tipe baru "ongkir_persen" + field maks_potongan (0=tanpa batas). _voucher_check(v,subtotal,
+  ongkir): diskon ongkir=ongkir*nilai/100, dibatasi maks & tak melebihi ongkir. create_order hitung
+  ongkir DULU sebelum voucher; total=subtotal+ongkir+asuransi-diskon. validate_voucher & checkout.tsx
+  kirim ongkir; checkout re-validasi voucher saat ongkir berubah. Admin voucher.tsx: 3 chip tipe +
+  field "Maksimal Potongan Ongkir".
+- Review: bintang produk sudah ada; DITAMBAH rata-rata rating+jumlah di produk (product_public.rating/
+  rating_count via _rating_map agregasi orders) tampil di toko.tsx (⭐ + Terjual) & produk/[id] (pill
+  Pelayanan/Pengiriman + per-review). Bintang kepuasan terpisah rating_pelayanan & rating_pengiriman
+  (1-5, opsional, clamp) di review_order + modal order/[id] (3 baris bintang). product reviews endpoint
+  kirim average_pelayanan/average_pengiriman. Gate: review hanya saat status=selesai (BE+FE).
+- Teruji: testing_agent iter37 15/15 pass BE + FE. Semua di sisi server+web (aktif stlh Publish); APK
+  perlu build baru utk UI review/checkout terbaru.
+- KASUS: 3 order (DS-261011-C68B/0BEZ/31E9, Lion Reg Pack) resi tak ditemukan di kurir. Akar: kurir
+  standard tidak mengembalikan waybill saat create order (AWB dialokasi async) → no_resi tersimpan =
+  Biteship order id (bukan AWB); webhook koreksi kemungkinan tak sampai ke produksi.
+- FIX: _biteship_order_payload diekstrak (dipakai booking + preview); +origin/destination_postal_code
+  (int, dari lokasi toko & alamat pembeli); +courier_insurance saat pembeli bayar asuransi (=subtotal).
+- Booking kini fetch ulang GET /v1/orders/{id} utk waybill segera. track_order MENYIMPAN waybill/status
+  terbaru ke no_resi/biteship_waybill/biteship_last_status (self-heal tiap lacak dibuka).
+- Endpoint baru: GET /api/admin/orders/{id atau no_order}/biteship-payload (admin) → JSON request
+  persis utk support Biteship. Dashboard pesanan: tombol "Payload Biteship" (modal JSON), dan order
+  Biteship tak lagi wajib input resi manual saat Kirim (auto-book). Cukup Publish + web.zip rebuild.
+- (1) Baseline Audit: BASELINE_AUDIT.md di-refresh ke v1.0.13 (stack SDK 57, ~86 endpoint, fitur terbaru,
+  3 jenis backup). (2) DB dump: mongodump test_database (BSON) + JSON readable (hash/token disensor) +
+  COLLECTION_STATS.txt + RESTORE_DB.md → static_downloads/db-dump.zip, endpoint baru
+  GET /api/download/db-dump.zip. (3) Full code: backup.zip di-rebuild (152 file, tanpa .env/node_modules/
+  biner, verifikasi 0 kebocoran .env). CATATAN: dump = DB preview/dev; data PRODUKSI terpisah di host deploy.
+## FIX push (iter37)
+- Channel Android "default" dipindah ke module scope app/_layout.tsx (playbook: jangan lazy di register
+  flow — push data-only saat app killed bisa ter-drop). setNotificationHandler tetap module scope push.ts.
+- Deep-link notif chat: _notify_chat kini kirim action_url "/chat?room=<buyer_id>&title=<nama>" utk
+  pesan buyer→admin (sebelumnya "/chat" polos → admin tap notif membuka room kosong). Buyer←admin tetap
+  "/chat". Fix murni backend → cukup redeploy, tak perlu APK baru.
+- Backend log INFO saat push trigger sukses (diagnosa produksi).
+- DIAGNOSA user: upload Google Service Account JSON di build panel sempat gagal & di-skip → FCM tak bisa
+  kirim (penyebab utama push tak sampai). Panduan Firebase → Project Settings → Service accounts →
+  Generate new private key (file *adminsdk*.json) sudah diberikan ke user.

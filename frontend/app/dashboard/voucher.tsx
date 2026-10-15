@@ -12,19 +12,22 @@ import { M3TextField } from "@/src/components/m3-text-field";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { formatRupiah } from "@/src/utils/format";
 
+type VoucherTipe = "persen" | "nominal" | "ongkir_persen";
+
 type Voucher = {
   id: string;
   kode: string;
-  tipe: "persen" | "nominal";
+  tipe: VoucherTipe;
   nilai: number;
   min_belanja: number;
+  maks_potongan: number;
   kuota: number;
   terpakai: number;
   aktif: boolean;
   kadaluarsa: string | null;
 };
 
-const EMPTY = { id: "", kode: "", tipe: "persen" as "persen" | "nominal", nilai: "", min_belanja: "", kuota: "", aktif: true, kadaluarsa: "" };
+const EMPTY = { id: "", kode: "", tipe: "persen" as VoucherTipe, nilai: "", min_belanja: "", maks_potongan: "", kuota: "", aktif: true, kadaluarsa: "" };
 
 export default function VoucherScreen() {
   const styles = useStyles();
@@ -55,6 +58,7 @@ export default function VoucherScreen() {
       tipe: v.tipe,
       nilai: String(v.nilai),
       min_belanja: v.min_belanja ? String(v.min_belanja) : "",
+      maks_potongan: v.maks_potongan ? String(v.maks_potongan) : "",
       kuota: v.kuota ? String(v.kuota) : "",
       aktif: v.aktif,
       kadaluarsa: v.kadaluarsa ?? "",
@@ -70,6 +74,7 @@ export default function VoucherScreen() {
         tipe: form.tipe,
         nilai: parseFloat(form.nilai) || 0,
         min_belanja: parseFloat(form.min_belanja) || 0,
+        maks_potongan: parseFloat(form.maks_potongan) || 0,
         kuota: parseInt(form.kuota, 10) || 0,
         aktif: form.aktif,
         kadaluarsa: form.kadaluarsa.trim() || null,
@@ -98,7 +103,7 @@ export default function VoucherScreen() {
     if (!form.kode.trim()) return setError("Kode voucher wajib diisi.");
     const nilai = parseFloat(form.nilai) || 0;
     if (nilai <= 0) return setError("Nilai diskon harus lebih dari 0.");
-    if (form.tipe === "persen" && nilai > 100) return setError("Diskon persen maksimal 100.");
+    if ((form.tipe === "persen" || form.tipe === "ongkir_persen") && nilai > 100) return setError("Diskon persen maksimal 100.");
     save.mutate();
   };
 
@@ -127,7 +132,9 @@ export default function VoucherScreen() {
                   </View>
                 </View>
                 <Text style={styles.value}>
-                  {v.tipe === "persen" ? `Diskon ${v.nilai}%` : `Potongan ${formatRupiah(v.nilai)}`}
+                  {v.tipe === "persen" ? `Diskon ${v.nilai}%`
+                    : v.tipe === "ongkir_persen" ? `Diskon Ongkir ${v.nilai}%${v.maks_potongan > 0 ? ` (maks ${formatRupiah(v.maks_potongan)})` : ""}`
+                    : `Potongan ${formatRupiah(v.nilai)}`}
                 </Text>
                 <Text style={styles.meta}>
                   {v.min_belanja > 0 ? `Min. belanja ${formatRupiah(v.min_belanja)}` : "Tanpa minimal belanja"}
@@ -163,16 +170,20 @@ export default function VoucherScreen() {
               <M3TextField label="Kode Voucher *" autoCapitalize="characters" value={form.kode} onChangeText={(t) => setForm((f) => ({ ...f, kode: t }))} containerTestID="vf-kode" />
               <Text style={styles.fieldLabel}>Tipe Diskon</Text>
               <View style={styles.tipeRow}>
-                {(["persen", "nominal"] as const).map((t) => {
+                {(["persen", "nominal", "ongkir_persen"] as const).map((t) => {
                   const active = form.tipe === t;
+                  const label = t === "persen" ? "Persen (%)" : t === "nominal" ? "Nominal (Rp)" : "Ongkir (%)";
                   return (
                     <Pressable key={t} testID={`vf-tipe-${t}`} onPress={() => setForm((f) => ({ ...f, tipe: t }))} style={[styles.tipeChip, active && styles.tipeChipActive]}>
-                      <Text style={[styles.tipeText, active && styles.tipeTextActive]}>{t === "persen" ? "Persen (%)" : "Nominal (Rp)"}</Text>
+                      <Text style={[styles.tipeText, active && styles.tipeTextActive]}>{label}</Text>
                     </Pressable>
                   );
                 })}
               </View>
-              <M3TextField label={form.tipe === "persen" ? "Besar Diskon (%)" : "Besar Potongan (Rp)"} keyboardType="number-pad" value={form.nilai} onChangeText={(t) => setForm((f) => ({ ...f, nilai: t }))} containerTestID="vf-nilai" />
+              <M3TextField label={form.tipe === "nominal" ? "Besar Potongan (Rp)" : form.tipe === "ongkir_persen" ? "Diskon Ongkir (%)" : "Besar Diskon (%)"} keyboardType="number-pad" value={form.nilai} onChangeText={(t) => setForm((f) => ({ ...f, nilai: t }))} containerTestID="vf-nilai" />
+              {form.tipe === "ongkir_persen" ? (
+                <M3TextField label="Maksimal Potongan Ongkir (Rp)" keyboardType="number-pad" placeholder="0 = tanpa batas" value={form.maks_potongan} onChangeText={(t) => setForm((f) => ({ ...f, maks_potongan: t }))} containerTestID="vf-maks" />
+              ) : null}
               <M3TextField label="Minimal Belanja (Rp)" keyboardType="number-pad" placeholder="0 = tanpa minimal" value={form.min_belanja} onChangeText={(t) => setForm((f) => ({ ...f, min_belanja: t }))} containerTestID="vf-min" />
               <M3TextField label="Kuota Pemakaian" keyboardType="number-pad" placeholder="0 = tanpa batas" value={form.kuota} onChangeText={(t) => setForm((f) => ({ ...f, kuota: t }))} containerTestID="vf-kuota" />
               <M3TextField label="Kadaluarsa (YYYY-MM-DD)" placeholder="Kosongkan jika tanpa batas" value={form.kadaluarsa} onChangeText={(t) => setForm((f) => ({ ...f, kadaluarsa: t }))} containerTestID="vf-exp" />

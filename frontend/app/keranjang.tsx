@@ -5,7 +5,7 @@ import { FlatList, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { M3Button } from "@/src/components/m3-button";
-import { CartItem, useCart } from "@/src/context/cart";
+import { CartItem, cartLineId, useCart } from "@/src/context/cart";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { formatRupiah } from "@/src/utils/format";
 import { resolveImageUrl } from "@/src/utils/image";
@@ -19,6 +19,7 @@ export default function KeranjangScreen() {
 
   const renderItem = ({ item }: { item: CartItem }) => {
     const cover = resolveImageUrl(item.foto);
+    const lid = cartLineId(item);
     return (
       <View style={styles.card} testID={`cart-item-${item.product_id}`}>
         {cover ? (
@@ -30,18 +31,19 @@ export default function KeranjangScreen() {
         )}
         <View style={{ flex: 1 }}>
           <Text style={styles.name} numberOfLines={2}>{item.nama_produk}</Text>
+          {item.variation_label ? <Text style={styles.variation}>Variasi: {item.variation_label}</Text> : null}
           <Text style={styles.price}>{formatRupiah(item.harga)}</Text>
           <View style={styles.stepper}>
-            <Pressable testID={`cart-minus-${item.product_id}`} onPress={() => setQty(item.product_id, item.qty - 1)} style={styles.stepBtn}>
+            <Pressable testID={`cart-minus-${item.product_id}`} onPress={() => setQty(lid, item.qty - 1)} style={styles.stepBtn}>
               <MaterialDesignIcons name="minus" size={16} color={colors.onSurface} />
             </Pressable>
             <Text style={styles.qty}>{item.qty}</Text>
-            <Pressable testID={`cart-plus-${item.product_id}`} onPress={() => setQty(item.product_id, item.qty + 1)} style={styles.stepBtn}>
+            <Pressable testID={`cart-plus-${item.product_id}`} onPress={() => setQty(lid, item.qty + 1)} style={styles.stepBtn}>
               <MaterialDesignIcons name="plus" size={16} color={colors.onSurface} />
             </Pressable>
           </View>
         </View>
-        <Pressable testID={`cart-remove-${item.product_id}`} onPress={() => removeItem(item.product_id)} style={styles.removeBtn}>
+        <Pressable testID={`cart-remove-${item.product_id}`} onPress={() => removeItem(lid)} style={styles.removeBtn}>
           <MaterialDesignIcons name="trash-can-outline" size={20} color={colors.error} />
         </Pressable>
       </View>
@@ -68,7 +70,7 @@ export default function KeranjangScreen() {
         <>
           <FlatList
             data={items}
-            keyExtractor={(i) => i.product_id}
+            keyExtractor={(i) => cartLineId(i)}
             renderItem={renderItem}
             contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 160 + insets.bottom }}
           />
@@ -106,6 +108,7 @@ const useStyles = makeStyles((colors) => ({
   thumb: { width: 64, height: 64, borderRadius: 12, backgroundColor: colors.surfaceTertiary },
   thumbEmpty: { alignItems: "center", justifyContent: "center" },
   name: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onSurface },
+  variation: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, marginTop: 2 },
   price: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.brandPrimary, marginTop: 2 },
   stepper: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 },
   stepBtn: {

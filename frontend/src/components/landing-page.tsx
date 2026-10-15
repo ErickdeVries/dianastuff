@@ -28,8 +28,8 @@ const FEATURES = [
 ];
 
 // Link download APK Android langsung dari CDN aset.
-const APK_URL = "https://customer-assets-wrfwihn1.emergentagent.net/job_diana-store-2/artifacts/9uez3af1_dianastuff-1.0.8.apk";
-const APK_VERSION = "1.0.8";
+const APK_URL = "https://diana-store-2.emergent.host/api/download/app.apk";
+const APK_VERSION = "1.0.13";
 
 const INSTALL_STEPS = [
   "Tekan tombol “Unduh APK Android”, lalu buka file yang terunduh.",

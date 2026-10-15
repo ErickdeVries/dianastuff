@@ -18,6 +18,7 @@ import httpx
 import requests
 import socketio
 from pathlib import Path
+from urllib.parse import quote
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
@@ -149,6 +150,12 @@ class ProductIn(BaseModel):
     foto_urls: List[str] = Field(default_factory=list)
     location_id: Optional[str] = None
     harga_diskon: Optional[float] = None  # harga setelah diskon; None/0 = tanpa diskon
+    has_variations: bool = False
+    # variations: [{"name": "Warna", "options": ["Merah", "Biru"]}, ...] (maks 2 grup)
+    variations: List[dict] = Field(default_factory=list)
+    # combinations: [{"options": ["Merah","S"], "harga": 100000, "harga_diskon": null,
+    #                 "stok": 5, "foto": "url", "sku": ""}, ...]
+    combinations: List[dict] = Field(default_factory=list)
 
 
 class LocationIn(BaseModel):
@@ -214,6 +221,7 @@ class AddressUpdate(BaseModel):
 class OrderItemIn(BaseModel):
     product_id: str
     qty: int
+    variation_key: Optional[str] = None  # "Merah|S" bila produk bervariasi
 
 
 class OrderCreate(BaseModel):
@@ -225,13 +233,22 @@ class OrderCreate(BaseModel):
     courier_company: Optional[str] = None
     courier_type: Optional[str] = None
     voucher_code: Optional[str] = None
+    asuransi: bool = False
+    asuransi_fee: float = 0
+
+
+class ShippingSettingsIn(BaseModel):
+    enabled_couriers: List[str] = Field(default_factory=list)
+    subsidy_mode: str = "none"       # none | discount | free
+    subsidy_amount: float = 0        # potongan nominal (mode discount)
 
 
 class VoucherIn(BaseModel):
     kode: str
-    tipe: str = "persen"          # "persen" | "nominal"
+    tipe: str = "persen"          # "persen" | "nominal" | "ongkir_persen"
     nilai: float = 0             # persen (0-100) atau nominal rupiah
     min_belanja: float = 0       # minimal subtotal agar voucher berlaku
+    maks_potongan: float = 0     # batas maksimal potongan (0 = tanpa batas; utk ongkir_persen)
     kuota: int = 0               # 0 = tak terbatas
     aktif: bool = True
     kadaluarsa: Optional[str] = None  # ISO date (YYYY-MM-DD) atau None
@@ -316,8 +333,33 @@ async def require_admin(authorization: Optional[str] = Header(None)) -> dict:
     return user
 
 
+def _combo_effective_price(c: dict) -> float:
+    harga = c.get("harga", 0) or 0
+    hd = c.get("harga_diskon")
+    if hd is not None and hd > 0 and hd < harga:
+        return hd
+    return harga
+
+
+def _combo_key(options) -> str:
+    return "|".join([str(o) for o in (options or [])])
+
+
+def _find_combination(p: dict, variation_key: Optional[str]) -> Optional[dict]:
+    if not variation_key:
+        return None
+    for c in p.get("combinations", []):
+        if _combo_key(c.get("options")) == variation_key:
+            return c
+    return None
+
+
 def _effective_price(p: dict) -> float:
-    """Discounted price when a valid harga_diskon is set, else the normal price."""
+    """Discounted price when a valid harga_diskon is set, else the normal price.
+    For products with variations, use the cheapest active combination price."""
+    if p.get("has_variations") and p.get("combinations"):
+        prices = [_combo_effective_price(c) for c in p["combinations"] if (c.get("harga") or 0) > 0]
+        return min(prices) if prices else 0
     harga = p.get("harga", 0) or 0
     hd = p.get("harga_diskon")
     if hd is not None and hd > 0 and hd < harga:
@@ -325,9 +367,21 @@ def _effective_price(p: dict) -> float:
     return harga
 
 
-def product_public(p: dict, terjual: int = 0) -> dict:
-    harga = p.get("harga", 0) or 0
-    harga_final = _effective_price(p)
+def product_public(p: dict, terjual: int = 0, rating: float = 0.0, rating_count: int = 0) -> dict:
+    has_var = bool(p.get("has_variations") and p.get("combinations"))
+    if has_var:
+        combos = p.get("combinations", [])
+        base_prices = [c.get("harga", 0) or 0 for c in combos if (c.get("harga") or 0) > 0]
+        eff_prices = [_combo_effective_price(c) for c in combos if (c.get("harga") or 0) > 0]
+        harga = min(base_prices) if base_prices else 0
+        harga_max = max(base_prices) if base_prices else 0
+        harga_final = min(eff_prices) if eff_prices else 0
+        stok = sum(int(c.get("stok", 0) or 0) for c in combos)
+    else:
+        harga = p.get("harga", 0) or 0
+        harga_max = harga
+        harga_final = _effective_price(p)
+        stok = p.get("stok", 0)
     diskon_aktif = harga_final < harga
     return {
         "id": p.get("id"),
@@ -335,19 +389,49 @@ def product_public(p: dict, terjual: int = 0) -> dict:
         "nama_produk": p.get("nama_produk"),
         "deskripsi": p.get("deskripsi", ""),
         "harga": harga,
-        "harga_diskon": p.get("harga_diskon") if diskon_aktif else None,
+        "harga_max": harga_max,
+        "harga_diskon": (p.get("harga_diskon") if diskon_aktif else None) if not has_var else None,
         "harga_final": harga_final,
         "diskon_persen": round((1 - harga_final / harga) * 100) if diskon_aktif and harga else 0,
-        "stok": p.get("stok", 0),
+        "stok": stok,
         "berat_gram": p.get("berat_gram", 0),
         "bisa_po": p.get("bisa_po", False),
         "foto_urls": p.get("foto_urls", []),
         "location_id": p.get("location_id"),
         "weight": p.get("berat_gram", 0),
+        "has_variations": has_var,
+        "variations": p.get("variations", []) if has_var else [],
+        "combinations": p.get("combinations", []) if has_var else [],
         "terjual": terjual,
         "views": p.get("views", 0),
+        "rating": rating,
+        "rating_count": rating_count,
         "created_at": p.get("created_at").isoformat() if p.get("created_at") else None,
     }
+
+
+async def _rating_map(product_ids: Optional[List[str]] = None) -> dict:
+    """Average product star rating + count per product, from reviewed orders."""
+    match: dict = {"deleted_at": None, "review": {"$ne": None}}
+    pipeline: list = [
+        {"$match": match},
+        {"$unwind": "$items"},
+    ]
+    if product_ids:
+        pipeline.append({"$match": {"items.product_id": {"$in": product_ids}}})
+    pipeline += [
+        {"$group": {
+            "_id": "$items.product_id",
+            "sum": {"$sum": "$review.rating"},
+            "count": {"$sum": 1},
+        }},
+    ]
+    rows = await db.orders.aggregate(pipeline).to_list(5000)
+    out: dict = {}
+    for r in rows:
+        cnt = r.get("count", 0) or 0
+        out[r["_id"]] = {"rating": round((r.get("sum", 0) or 0) / cnt, 1) if cnt else 0, "count": cnt}
+    return out
 
 
 async def _sold_map(product_ids: Optional[List[str]] = None) -> dict:
@@ -531,6 +615,51 @@ async def delete_my_address(address_id: str, user: dict = Depends(get_current_us
     return {"ok": True}
 
 
+ALL_COURIERS = ["gojek", "grab", "jne", "jnt", "lion", "lalamove", "ninja", "paxel", "pos"]
+
+
+async def _shipping_settings() -> dict:
+    doc = await db.store_settings.find_one({"_id": "shipping"}) or {}
+    return {
+        "enabled_couriers": doc.get("enabled_couriers") or ALL_COURIERS,
+        "subsidy_mode": doc.get("subsidy_mode", "none"),
+        "subsidy_amount": float(doc.get("subsidy_amount", 0) or 0),
+    }
+
+
+def _apply_subsidy(price: float, settings: dict) -> tuple:
+    """Return (buyer_price, subsidi_amount) after applying the store subsidy."""
+    mode = settings.get("subsidy_mode", "none")
+    if mode == "free":
+        return 0.0, price
+    if mode == "discount":
+        amt = min(settings.get("subsidy_amount", 0) or 0, price)
+        return max(0.0, price - amt), amt
+    return price, 0.0
+
+
+@api_router.get("/admin/shipping-settings")
+async def get_shipping_settings(admin: dict = Depends(require_admin)):
+    s = await _shipping_settings()
+    return {**s, "all_couriers": ALL_COURIERS}
+
+
+@api_router.put("/admin/shipping-settings")
+async def set_shipping_settings(payload: ShippingSettingsIn, admin: dict = Depends(require_admin)):
+    couriers = [c for c in (payload.enabled_couriers or []) if c in ALL_COURIERS] or ALL_COURIERS
+    mode = payload.subsidy_mode if payload.subsidy_mode in ("none", "discount", "free") else "none"
+    await db.store_settings.update_one(
+        {"_id": "shipping"},
+        {"$set": {
+            "enabled_couriers": couriers,
+            "subsidy_mode": mode,
+            "subsidy_amount": max(0.0, payload.subsidy_amount or 0),
+        }},
+        upsert=True,
+    )
+    return await _shipping_settings()
+
+
 @api_router.post("/shipping/rates")
 async def shipping_rates(payload: RatesIn, user: dict = Depends(get_current_user)):
     # Origin: product location (future multi-origin) or tenant default location.
@@ -550,17 +679,29 @@ async def shipping_rates(payload: RatesIn, user: dict = Depends(get_current_user
         dlat, dlng = addr["latitude"], addr["longitude"]
     if dlat is None or dlng is None:
         raise HTTPException(status_code=400, detail="Titik lokasi tujuan belum dipilih")
-    items = payload.items or [{"name": "Barang", "value": 10000, "length": 10, "width": 10, "height": 10, "weight": 500, "quantity": 1}]
+    items = payload.items or [{"name": "Barang", "value": 10000, "weight": 250, "quantity": 1}]
+    settings = await _shipping_settings()
     body = {
         "origin_latitude": origin["latitude"],
         "origin_longitude": origin["longitude"],
         "destination_latitude": dlat,
         "destination_longitude": dlng,
-        "couriers": "gojek,grab,jne,jnt,lion,lalamove,ninja,paxel",
+        "couriers": ",".join(settings["enabled_couriers"]),
         "items": items,
     }
     data = await _biteship("POST", "/v1/rates/couriers", body)
-    return {"pricing": data.get("pricing", []), "origin": data.get("origin"), "destination": data.get("destination")}
+    pricing = []
+    for r in data.get("pricing", []):
+        price = r.get("price", 0) or 0
+        buyer_price, subsidi = _apply_subsidy(price, settings)
+        r = {**r, "price_asli": price, "price": buyer_price, "subsidi": subsidi}
+        pricing.append(r)
+    return {
+        "pricing": pricing,
+        "origin": data.get("origin"),
+        "destination": data.get("destination"),
+        "subsidy_mode": settings["subsidy_mode"],
+    }
 
 
 class ShipOrderIn(BaseModel):
@@ -568,9 +709,9 @@ class ShipOrderIn(BaseModel):
     courier_type: str
 
 
-async def _create_biteship_shipment(order: dict, courier_company: Optional[str] = None, courier_type: Optional[str] = None) -> dict:
-    """Book a Biteship shipment for an order. Returns Biteship order data.
-    Raises HTTPException if store origin / destination coordinate missing."""
+async def _biteship_order_payload(order: dict, courier_company: Optional[str] = None, courier_type: Optional[str] = None) -> dict:
+    """Build the POST /v1/orders JSON body for an order. Shared by the actual
+    booking and the admin payload-preview endpoint (for Biteship support)."""
     origin = await _default_location()
     if not origin:
         raise HTTPException(status_code=400, detail="Alamat toko belum diatur")
@@ -582,12 +723,11 @@ async def _create_biteship_shipment(order: dict, courier_company: Optional[str] 
         {
             "name": it.get("nama_produk") or "Produk",
             "value": int(it.get("harga") or 0),
-            "length": 15, "width": 15, "height": 10,
-            "weight": int(it.get("weight") or it.get("berat_gram") or 500),
+            "weight": int(it.get("weight") or it.get("berat_gram") or 250),
             "quantity": int(it.get("qty") or 1),
         }
         for it in (order.get("items") or [])
-    ] or [{"name": "Pesanan", "value": int(order.get("subtotal") or 10000), "length": 10, "width": 10, "height": 10, "weight": 500, "quantity": 1}]
+    ] or [{"name": "Pesanan", "value": int(order.get("subtotal") or 10000), "weight": 250, "quantity": 1}]
     body = {
         "reference_id": order.get("no_order") or order.get("id"),
         "shipper_contact_name": origin["contact_name"],
@@ -605,13 +745,41 @@ async def _create_biteship_shipment(order: dict, courier_company: Optional[str] 
         "delivery_type": "now",
         "items": items,
     }
+    # Biteship requires postal codes (integer) for most couriers — we have them
+    # on the store location and the buyer address, so always send them.
+    origin_pc = str(origin.get("postal_code") or "").strip()
+    dest_pc = str(alamat.get("kode_pos") or "").strip()
+    if origin_pc.isdigit():
+        body["origin_postal_code"] = int(origin_pc)
+    if dest_pc.isdigit():
+        body["destination_postal_code"] = int(dest_pc)
+    # Register courier insurance when the buyer paid for it (declared value = goods subtotal).
+    if order.get("asuransi"):
+        body["courier_insurance"] = int(order.get("subtotal") or 0)
+    return body
+
+
+async def _create_biteship_shipment(order: dict, courier_company: Optional[str] = None, courier_type: Optional[str] = None) -> dict:
+    """Book a Biteship shipment for an order. Returns Biteship order data.
+    Raises HTTPException if store origin / destination coordinate missing."""
+    body = await _biteship_order_payload(order, courier_company, courier_type)
     data = await _biteship("POST", "/v1/orders", body)
     courier = data.get("courier") or {}
+    waybill = courier.get("waybill_id")
+    if not waybill and data.get("id"):
+        # Standard couriers (JNE/Lion/dll) often allocate the AWB asynchronously —
+        # fetch the order once so we don't store the Biteship id as a fake resi.
+        try:
+            fresh = await _biteship("GET", f"/v1/orders/{data['id']}")
+            waybill = (fresh.get("courier") or {}).get("waybill_id") or waybill
+        except Exception:
+            pass
+    data["courier"] = {**courier, "waybill_id": waybill}
     await db.orders.update_one(
         {"id": order["id"]},
         {"$set": {
             "biteship_order_id": data.get("id"),
-            "biteship_waybill": courier.get("waybill_id"),
+            "biteship_waybill": waybill,
             "biteship_tracking_id": courier.get("tracking_id") or data.get("id"),
         }},
     )
@@ -627,6 +795,31 @@ async def ship_order(order_id: str, payload: ShipOrderIn, admin: dict = Depends(
     return {"ok": True, "biteship_order_id": data.get("id"), "courier": data.get("courier")}
 
 
+@api_router.get("/admin/orders/{order_id}/biteship-payload")
+async def biteship_payload_preview(order_id: str, admin: dict = Depends(require_admin)):
+    """Show the exact JSON body our backend sends to Biteship POST /v1/orders for
+    an order — for support tickets. Accepts the internal id or no_order (DS-...)."""
+    order = await db.orders.find_one(
+        {"$or": [{"id": order_id}, {"no_order": order_id}]}, {"_id": 0}
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
+    try:
+        payload = await _biteship_order_payload(order)
+    except HTTPException as e:
+        payload = {"error": e.detail}
+    return {
+        "no_order": order.get("no_order"),
+        "biteship_order_id": order.get("biteship_order_id"),
+        "biteship_waybill": order.get("biteship_waybill"),
+        "no_resi": order.get("no_resi"),
+        "biteship_last_status": order.get("biteship_last_status"),
+        "courier_company": order.get("courier_company"),
+        "courier_type": order.get("courier_type"),
+        "request_payload": payload,
+    }
+
+
 @api_router.get("/orders/{order_id}/track")
 async def track_order(order_id: str, user: dict = Depends(get_current_user)):
     order = await db.orders.find_one({"id": order_id, "deleted_at": None}, {"_id": 0})
@@ -639,6 +832,18 @@ async def track_order(order_id: str, user: dict = Depends(get_current_user)):
         # Non-Biteship (manual resi) order — no live tracking available.
         return {"tracked": False, "status": order.get("status"), "waybill": order.get("no_resi"), "history": []}
     data = await _biteship("GET", f"/v1/trackings/{tid}")
+    # Persist the freshest waybill/status so labels & buyer pages always show the
+    # real courier AWB (standard couriers assign it asynchronously after booking).
+    fresh_waybill = data.get("waybill_id")
+    fresh_status = (data.get("status") or "").lower() or None
+    sets: dict = {}
+    if fresh_waybill and fresh_waybill != order.get("biteship_waybill"):
+        sets["biteship_waybill"] = fresh_waybill
+        sets["no_resi"] = fresh_waybill
+    if fresh_status:
+        sets["biteship_last_status"] = fresh_status
+    if sets:
+        await db.orders.update_one({"id": order_id}, {"$set": sets})
     history = [
         {"status": h.get("status"), "note": h.get("note"), "updated_at": h.get("updated_at"), "service_type": h.get("service_type")}
         for h in (data.get("history") or [])
@@ -1091,6 +1296,33 @@ async def download_backup_bundle():
     )
 
 
+@api_router.api_route("/download/db-dump.zip", methods=["GET", "HEAD"])
+async def download_db_dump():
+    zip_path = ROOT_DIR / "static_downloads" / "db-dump.zip"
+    if not zip_path.exists():
+        raise HTTPException(status_code=404, detail="DB dump belum tersedia")
+    return FileResponse(
+        path=str(zip_path),
+        filename="dianastuff-db-dump.zip",
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="dianastuff-db-dump.zip"'},
+    )
+
+@api_router.api_route("/download/BASELINE_AUDIT.md", methods=["GET", "HEAD"])
+async def download_baseline_audit():
+    doc_path = ROOT_DIR.parent / "BASELINE_AUDIT.md"
+    if not doc_path.exists():
+        raise HTTPException(status_code=404, detail="Audit belum tersedia")
+    return FileResponse(
+        path=str(doc_path),
+        filename="BASELINE_AUDIT.md",
+        media_type="text/markdown",
+        headers={"Content-Disposition": 'attachment; filename="BASELINE_AUDIT.md"'},
+    )
+
+
+
+
 
 # ---------------------------------------------------------------------------
 # Products (public read; admin write)
@@ -1104,8 +1336,13 @@ async def list_products(search: Optional[str] = None):
             {"kategori": {"$regex": search, "$options": "i"}},
         ]
     docs = await db.products.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    sold = await _sold_map([d.get("id") for d in docs])
-    return [product_public(d, sold.get(d.get("id"), 0)) for d in docs]
+    ids = [d.get("id") for d in docs]
+    sold = await _sold_map(ids)
+    rmap = await _rating_map(ids)
+    return [
+        product_public(d, sold.get(d.get("id"), 0), rmap.get(d.get("id"), {}).get("rating", 0), rmap.get(d.get("id"), {}).get("count", 0))
+        for d in docs
+    ]
 
 
 @api_router.get("/products/{product_id}")
@@ -1114,7 +1351,9 @@ async def get_product(product_id: str):
     if not doc:
         raise HTTPException(status_code=404, detail="Produk tidak ditemukan")
     sold = await _sold_map([product_id])
-    return product_public(doc, sold.get(product_id, 0))
+    rmap = await _rating_map([product_id])
+    rm = rmap.get(product_id, {})
+    return product_public(doc, sold.get(product_id, 0), rm.get("rating", 0), rm.get("count", 0))
 
 
 async def _user_from_bearer(authorization: Optional[str]) -> Optional[dict]:
@@ -1643,14 +1882,26 @@ async def product_reviews(product_id: str):
     )
     items = []
     total = 0
+    sum_pelayanan = 0
+    cnt_pelayanan = 0
+    sum_pengiriman = 0
+    cnt_pengiriman = 0
     async for o in cursor:
         rv = o.get("review") or {}
         rating = int(rv.get("rating", 0) or 0)
         if rating < 1:
             continue
         total += rating
+        rp = rv.get("rating_pelayanan")
+        rk = rv.get("rating_pengiriman")
+        if rp:
+            sum_pelayanan += int(rp); cnt_pelayanan += 1
+        if rk:
+            sum_pengiriman += int(rk); cnt_pengiriman += 1
         items.append({
             "rating": rating,
+            "rating_pelayanan": rp,
+            "rating_pengiriman": rk,
             "komentar": rv.get("komentar", ""),
             "foto_url": rv.get("foto_url"),
             "nama": (o.get("alamat") or {}).get("nama") or "Pembeli",
@@ -1659,7 +1910,13 @@ async def product_reviews(product_id: str):
     items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     count = len(items)
     average = round(total / count, 1) if count else 0
-    return {"average": average, "count": count, "items": items}
+    return {
+        "average": average,
+        "count": count,
+        "average_pelayanan": round(sum_pelayanan / cnt_pelayanan, 1) if cnt_pelayanan else 0,
+        "average_pengiriman": round(sum_pengiriman / cnt_pengiriman, 1) if cnt_pengiriman else 0,
+        "items": items,
+    }
 
 
 @api_router.post("/products")
@@ -1818,6 +2075,8 @@ def order_public(o: dict) -> dict:
         "voucher_code": o.get("voucher_code"),
         "voucher_diskon": o.get("voucher_diskon", 0),
         "ongkir": o.get("ongkir", 0),
+        "asuransi": o.get("asuransi", False),
+        "asuransi_fee": o.get("asuransi_fee", 0),
         "total": o.get("total", 0),
         "status": o.get("status"),
         "no_resi": o.get("no_resi"),
@@ -1874,6 +2133,7 @@ def voucher_public(v: dict) -> dict:
         "tipe": v.get("tipe", "persen"),
         "nilai": v.get("nilai", 0),
         "min_belanja": v.get("min_belanja", 0),
+        "maks_potongan": v.get("maks_potongan", 0),
         "kuota": v.get("kuota", 0),
         "terpakai": v.get("terpakai", 0),
         "aktif": v.get("aktif", True),
@@ -1881,8 +2141,10 @@ def voucher_public(v: dict) -> dict:
     }
 
 
-def _voucher_check(v: Optional[dict], subtotal: float) -> tuple:
-    """Return (diskon, error_message). diskon=0 with message when invalid."""
+def _voucher_check(v: Optional[dict], subtotal: float, ongkir: float = 0.0) -> tuple:
+    """Return (diskon, error_message). diskon=0 with message when invalid.
+    The discount is always a single rupiah amount deducted from the grand total,
+    whether it targets subtotal (persen/nominal) or shipping (ongkir_persen)."""
     if not v:
         return 0.0, "Kode voucher tidak ditemukan"
     if not v.get("aktif", True):
@@ -1899,10 +2161,18 @@ def _voucher_check(v: Optional[dict], subtotal: float) -> tuple:
         return 0.0, "Kuota voucher sudah habis"
     if subtotal < (v.get("min_belanja", 0) or 0):
         return 0.0, f"Minimal belanja Rp {int(v.get('min_belanja', 0)):,} untuk voucher ini".replace(",", ".")
-    if v.get("tipe") == "nominal":
-        diskon = min(float(v.get("nilai", 0) or 0), subtotal)
+    tipe = v.get("tipe")
+    nilai = float(v.get("nilai", 0) or 0)
+    maks = float(v.get("maks_potongan", 0) or 0)
+    if tipe == "ongkir_persen":
+        diskon = ongkir * nilai / 100.0
+        if maks > 0:
+            diskon = min(diskon, maks)
+        diskon = min(diskon, ongkir)  # never exceed the shipping cost itself
+    elif tipe == "nominal":
+        diskon = min(nilai, subtotal)
     else:
-        diskon = subtotal * float(v.get("nilai", 0) or 0) / 100.0
+        diskon = subtotal * nilai / 100.0
     return round(diskon), ""
 
 
@@ -1910,8 +2180,9 @@ def _voucher_check(v: Optional[dict], subtotal: float) -> tuple:
 async def validate_voucher(payload: dict, user: dict = Depends(get_current_user)):
     kode = (payload.get("kode") or "").strip().upper()
     subtotal = float(payload.get("subtotal", 0) or 0)
+    ongkir = float(payload.get("ongkir", 0) or 0)
     v = await db.vouchers.find_one({"kode": kode}, {"_id": 0})
-    diskon, msg = _voucher_check(v, subtotal)
+    diskon, msg = _voucher_check(v, subtotal, ongkir)
     if msg:
         return {"valid": False, "diskon": 0, "message": msg}
     return {"valid": True, "diskon": diskon, "voucher": voucher_public(v), "message": "Voucher diterapkan"}
@@ -1928,11 +2199,11 @@ async def create_voucher(payload: VoucherIn, admin: dict = Depends(require_admin
     kode = payload.kode.strip().upper()
     if not kode:
         raise HTTPException(status_code=400, detail="Kode voucher wajib diisi")
-    if payload.tipe not in ("persen", "nominal"):
+    if payload.tipe not in ("persen", "nominal", "ongkir_persen"):
         raise HTTPException(status_code=400, detail="Tipe voucher tidak valid")
     if payload.nilai <= 0:
         raise HTTPException(status_code=400, detail="Nilai diskon harus lebih dari 0")
-    if payload.tipe == "persen" and payload.nilai > 100:
+    if payload.tipe in ("persen", "ongkir_persen") and payload.nilai > 100:
         raise HTTPException(status_code=400, detail="Diskon persen maksimal 100")
     if await db.vouchers.find_one({"kode": kode}):
         raise HTTPException(status_code=409, detail="Kode voucher sudah ada")
@@ -1942,6 +2213,7 @@ async def create_voucher(payload: VoucherIn, admin: dict = Depends(require_admin
         "tipe": payload.tipe,
         "nilai": payload.nilai,
         "min_belanja": max(0.0, payload.min_belanja),
+        "maks_potongan": max(0.0, payload.maks_potongan),
         "kuota": max(0, payload.kuota),
         "aktif": payload.aktif,
         "kadaluarsa": payload.kadaluarsa or None,
@@ -1968,6 +2240,7 @@ async def update_voucher(voucher_id: str, payload: VoucherIn, admin: dict = Depe
         "tipe": payload.tipe,
         "nilai": payload.nilai,
         "min_belanja": max(0.0, payload.min_belanja),
+        "maks_potongan": max(0.0, payload.maks_potongan),
         "kuota": max(0, payload.kuota),
         "aktif": payload.aktif,
         "kadaluarsa": payload.kadaluarsa or None,
@@ -2000,27 +2273,57 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
         product = await db.products.find_one({"id": it.product_id, "deleted_at": None})
         if not product:
             raise HTTPException(status_code=404, detail="Produk tidak ditemukan")
-        if not product.get("bisa_po") and product.get("stok", 0) < it.qty:
-            raise HTTPException(status_code=400, detail=f"Stok {product['nama_produk']} tidak cukup")
-        unit = _effective_price(product)
+        has_var = bool(product.get("has_variations") and product.get("combinations"))
+        combo = None
+        var_label = None
+        if has_var:
+            combo = _find_combination(product, it.variation_key)
+            if not combo:
+                raise HTTPException(status_code=400, detail=f"Pilih variasi untuk {product['nama_produk']}")
+            if not product.get("bisa_po") and int(combo.get("stok", 0) or 0) < it.qty:
+                raise HTTPException(status_code=400, detail=f"Stok variasi {product['nama_produk']} tidak cukup")
+            unit = _combo_effective_price(combo)
+            var_label = ", ".join([str(o) for o in (combo.get("options") or [])])
+            foto = combo.get("foto") or (product.get("foto_urls") or [None])[0]
+            harga_asli = combo.get("harga", 0)
+        else:
+            if not product.get("bisa_po") and product.get("stok", 0) < it.qty:
+                raise HTTPException(status_code=400, detail=f"Stok {product['nama_produk']} tidak cukup")
+            unit = _effective_price(product)
+            foto = (product.get("foto_urls") or [None])[0]
+            harga_asli = product.get("harga", 0)
         line = unit * it.qty
         subtotal += line
         order_items.append({
             "product_id": it.product_id,
             "nama_produk": product.get("nama_produk"),
             "harga": unit,
-            "harga_asli": product.get("harga", 0),
+            "harga_asli": harga_asli,
             "qty": it.qty,
-            "foto": (product.get("foto_urls") or [None])[0],
+            "foto": foto,
             "subtotal": line,
+            "variation_key": it.variation_key if has_var else None,
+            "variation_label": var_label,
+            "weight": combo.get("berat_gram") if (combo and combo.get("berat_gram")) else product.get("berat_gram", 0),
         })
 
     if not order_items:
         raise HTTPException(status_code=400, detail="Keranjang kosong")
 
-    # Decrement stock (PO products may go negative).
+    # Decrement stock (PO products may go negative). Variation combos decrement
+    # their own stock; simple products decrement the product-level stock.
     for it in order_items:
-        await db.products.update_one({"id": it["product_id"]}, {"$inc": {"stok": -it["qty"]}})
+        if it.get("variation_key"):
+            await db.products.update_one(
+                {"id": it["product_id"], "combinations.options": it["variation_key"].split("|")},
+                {"$inc": {"combinations.$.stok": -it["qty"]}},
+            )
+        else:
+            await db.products.update_one({"id": it["product_id"]}, {"$inc": {"stok": -it["qty"]}})
+
+    # Compute shipping first so an ongkir_persen voucher can discount it.
+    ongkir = max(0.0, payload.ongkir or 0)
+    asuransi_fee = max(0.0, payload.asuransi_fee or 0) if payload.asuransi else 0.0
 
     # Apply voucher (server-side validated so the discount can't be forged).
     voucher_code = None
@@ -2028,15 +2331,14 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
     if payload.voucher_code:
         kode = payload.voucher_code.strip().upper()
         v = await db.vouchers.find_one({"kode": kode})
-        diskon, msg = _voucher_check(v, subtotal)
+        diskon, msg = _voucher_check(v, subtotal, ongkir)
         if msg:
             raise HTTPException(status_code=400, detail=msg)
         voucher_code = kode
         voucher_diskon = diskon
         await db.vouchers.update_one({"id": v["id"]}, {"$inc": {"terpakai": 1}})
 
-    ongkir = max(0.0, payload.ongkir or 0)
-    total = max(0.0, subtotal - voucher_diskon) + ongkir
+    total = max(0.0, subtotal + ongkir + asuransi_fee - voucher_diskon)
     now = datetime.now(timezone.utc)
     no_order = f"DS-{now.strftime('%y%m%d')}-{secrets.token_hex(2).upper()}"
 
@@ -2049,6 +2351,8 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
         "voucher_code": voucher_code,
         "voucher_diskon": voucher_diskon,
         "ongkir": ongkir,
+        "asuransi": bool(payload.asuransi),
+        "asuransi_fee": asuransi_fee,
         "total": total,
         "status": "menunggu_pembayaran",
         "status_history": [{"status": "menunggu_pembayaran", "at": now}],
@@ -2250,15 +2554,27 @@ async def review_order(order_id: str, body: dict, user: dict = Depends(get_curre
     rating = int((body or {}).get("rating", 0))
     if rating < 1 or rating > 5:
         raise HTTPException(status_code=400, detail="Rating 1-5")
+
+    def _clamp(v):
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            return None
+        return n if 1 <= n <= 5 else None
+
     doc = await db.orders.find_one({"id": order_id, "deleted_at": None})
     if not doc:
         raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
     if doc.get("user_id") != user["user_id"]:
         raise HTTPException(status_code=403, detail="Akses ditolak")
+    if doc.get("status") != "selesai":
+        raise HTTPException(status_code=400, detail="Ulasan hanya bisa setelah pesanan selesai")
     await db.orders.update_one(
         {"id": order_id},
         {"$set": {"review": {
             "rating": rating,
+            "rating_pelayanan": _clamp((body or {}).get("rating_pelayanan")),
+            "rating_pengiriman": _clamp((body or {}).get("rating_pengiriman")),
             "komentar": (body or {}).get("komentar", ""),
             "foto_url": (body or {}).get("foto_url"),
             "created_at": datetime.now(timezone.utc),
@@ -2313,6 +2629,171 @@ async def chat_rooms(admin: dict = Depends(require_admin)):
     return rooms
 
 
+# ---------------------------------------------------------------------------
+# Push notifications (Emergent managed relay — SuprSend passthrough)
+# ---------------------------------------------------------------------------
+PUSH_BASE_URL = "https://integrations.emergentagent.com"
+PUSH_KEY = os.environ.get("EMERGENT_PUSH_KEY", "placeholder")
+_push_client = httpx.AsyncClient(base_url=PUSH_BASE_URL, headers={"X-Push-Key": PUSH_KEY}, timeout=10.0)
+
+
+class RegisterPushBody(BaseModel):
+    user_id: str
+    platform: str
+    device_token: str
+
+
+@api_router.post("/register-push", status_code=201)
+async def register_push(body: RegisterPushBody):
+    try:
+        resp = await _push_client.post("/api/v1/push/users/register", json=body.model_dump())
+        if resp.status_code == 401:
+            raise HTTPException(500, "EMERGENT_PUSH_KEY missing or invalid")
+        if resp.status_code >= 500:
+            raise HTTPException(502, "Push provider unavailable")
+        resp.raise_for_status()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"register_push failed (non-blocking): {e}")
+        return {"status": "skipped"}
+    return {"status": "registered"}
+
+
+async def send_push(recipients: List[str], data: dict, idempotency_key: Optional[str] = None) -> None:
+    recipients = [r for r in (recipients or []) if r]
+    if not recipients or "title" not in data or "message" not in data:
+        return
+    for i in range(0, len(recipients), 100):  # chunk: max 100 recipients per trigger
+        payload: dict = {"recipients": recipients[i:i + 100], "data": data}
+        if idempotency_key:
+            payload["$idempotency_key"] = f"{idempotency_key}:{i}"
+        resp = await _push_client.post("/api/v1/push/trigger", json=payload)
+        resp.raise_for_status()
+        logger.info(f"push trigger ok: {len(payload['recipients'])} recipient(s), title={data.get('title')!r}")
+
+
+async def _admin_user_ids() -> List[str]:
+    rows = await db.users.find({"role": "admin", "deleted_at": None}, {"user_id": 1, "_id": 0}).to_list(100)
+    return [r["user_id"] for r in rows if r.get("user_id")]
+
+
+async def _buyer_user_ids() -> List[str]:
+    rows = await db.users.find(
+        {"role": {"$ne": "admin"}, "status": "approved", "deleted_at": None},
+        {"user_id": 1, "_id": 0},
+    ).to_list(5000)
+    return [r["user_id"] for r in rows if r.get("user_id")]
+
+
+async def _notify_chat(doc: dict):
+    """Push a new chat message to the offline party (buyer <-> admins)."""
+    try:
+        sender_is_admin = doc.get("sender_role") == "admin"
+        if sender_is_admin:
+            recipients = [doc["room"]]
+            title = "Pesan dari Admin"
+            action_url = "/chat"
+        else:
+            recipients = await _admin_user_ids()
+            sender_name = doc.get("sender_nama") or "Pembeli"
+            title = f"Pesan dari {sender_name}"
+            # Deep-link admin langsung ke room pembeli pengirim.
+            action_url = f"/chat?room={doc['room']}&title={quote(sender_name)}"
+        body = doc.get("text") or ("📷 Mengirim foto" if doc.get("image_url") else "Pesan baru")
+        await send_push(
+            recipients,
+            {"title": title, "message": body[:140], "action_url": action_url},
+            idempotency_key=f"chat:{doc.get('id')}",
+        )
+    except Exception as e:
+        logger.warning(f"chat push failed (non-blocking): {e}")
+
+
+# ---------------------------------------------------------------------------
+# Notifications / broadcast (multi-tenant ready)
+# ---------------------------------------------------------------------------
+class BroadcastIn(BaseModel):
+    title: str
+    message: str
+    image_url: Optional[str] = None
+    action_url: Optional[str] = None
+    target: str = "all"            # "all" | "selected"
+    user_ids: List[str] = Field(default_factory=list)
+
+
+def notification_public(n: dict) -> dict:
+    return {
+        "id": n.get("id"),
+        "tipe": n.get("tipe", "promo"),
+        "title": n.get("title"),
+        "message": n.get("message"),
+        "image_url": n.get("image_url"),
+        "action_url": n.get("action_url"),
+        "target": n.get("target", "all"),
+        "recipients_count": n.get("recipients_count", 0),
+        "created_at": n.get("created_at").isoformat() if n.get("created_at") else None,
+    }
+
+
+@api_router.post("/admin/broadcast")
+async def admin_broadcast(payload: BroadcastIn, admin: dict = Depends(require_admin)):
+    if not payload.title.strip() or not payload.message.strip():
+        raise HTTPException(status_code=400, detail="Judul dan pesan wajib diisi")
+    if payload.target == "selected":
+        recipients = [u for u in payload.user_ids if u]
+        if not recipients:
+            raise HTTPException(status_code=400, detail="Pilih minimal 1 pelanggan")
+    else:
+        recipients = await _buyer_user_ids()
+    doc = {
+        "id": f"ntf_{uuid.uuid4().hex[:12]}",
+        "tenant_id": admin.get("tenant_id", DEFAULT_TENANT),
+        "tipe": "promo",
+        "title": payload.title.strip(),
+        "message": payload.message.strip(),
+        "image_url": payload.image_url,
+        "action_url": payload.action_url,
+        "target": payload.target,
+        "user_ids": recipients if payload.target == "selected" else [],
+        "recipients_count": len(recipients),
+        "created_by": admin["user_id"],
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.notifications.insert_one(doc)
+    data = {"title": doc["title"], "message": doc["message"]}
+    if doc.get("image_url"):
+        data["image_url"] = doc["image_url"]
+    if doc.get("action_url"):
+        data["action_url"] = doc["action_url"]
+    try:
+        await send_push(recipients, data, idempotency_key=f"promo:{doc['id']}")
+    except Exception as e:
+        logger.warning(f"broadcast push failed (non-blocking): {e}")
+    return notification_public(doc)
+
+
+@api_router.get("/admin/broadcast")
+async def list_broadcasts(admin: dict = Depends(require_admin)):
+    tenant = admin.get("tenant_id", DEFAULT_TENANT)
+    rows = await db.notifications.find(
+        {"tenant_id": tenant, "tipe": "promo"}, {"_id": 0}
+    ).sort("created_at", -1).limit(100).to_list(100)
+    return [notification_public(r) for r in rows]
+
+
+@api_router.get("/notifications")
+async def my_notifications(user: dict = Depends(get_current_user)):
+    tenant = user.get("tenant_id", DEFAULT_TENANT)
+    rows = await db.notifications.find(
+        {"tenant_id": tenant, "tipe": "promo",
+         "$or": [{"target": "all"}, {"user_ids": user["user_id"]}]},
+        {"_id": 0},
+    ).sort("created_at", -1).limit(50).to_list(50)
+    return [notification_public(r) for r in rows]
+
+
+
 async def save_chat_message(room: str, sender: dict, text: Optional[str], image_url: Optional[str]) -> dict:
     is_admin = sender.get("role") == "admin"
     doc = {
@@ -2364,6 +2845,7 @@ async def chat_send(body: dict, user: dict = Depends(get_current_user)):
     doc = await save_chat_message(room, user, text, image_url)
     payload = chat_public(doc)
     await sio.emit("message", payload, room=[room, "admins"])
+    await _notify_chat(doc)
     return payload
 
 
@@ -2757,6 +3239,7 @@ async def message(sid, data):
         return
     doc = await save_chat_message(room, session, text, image_url)
     await sio.emit("message", chat_public(doc), room=[room, "admins"])
+    await _notify_chat(doc)
 
 
 

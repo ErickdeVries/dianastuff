@@ -61,6 +61,8 @@ export default function OrderDetail() {
   const [uploading, setUploading] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [rating, setRating] = useState(5);
+  const [ratingPelayanan, setRatingPelayanan] = useState(5);
+  const [ratingPengiriman, setRatingPengiriman] = useState(5);
   const [komentar, setKomentar] = useState("");
   const [reviewFoto, setReviewFoto] = useState<string | null>(null);
   const [uploadingReview, setUploadingReview] = useState(false);
@@ -101,7 +103,7 @@ export default function OrderDetail() {
   });
 
   const submitReview = useMutation({
-    mutationFn: () => apiRequest(`/api/orders/${id}/review`, { method: "POST", body: { rating, komentar, foto_url: reviewFoto } }),
+    mutationFn: () => apiRequest(`/api/orders/${id}/review`, { method: "POST", body: { rating, rating_pelayanan: ratingPelayanan, rating_pengiriman: ratingPengiriman, komentar, foto_url: reviewFoto } }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["order", id] });
       setReviewOpen(false);
@@ -363,12 +365,33 @@ export default function OrderDetail() {
         <Pressable style={styles.backdrop} onPress={() => setReviewOpen(false)}>
           <Pressable style={styles.reviewCard} onPress={() => {}}>
             <Text style={styles.cardTitle}>Beri Ulasan</Text>
+            <Text style={styles.ratingLabel}>Kualitas Produk</Text>
             <View style={{ flexDirection: "row", gap: 6, justifyContent: "center", marginVertical: 8 }}>
               {[1, 2, 3, 4, 5].map((n) => (
                 <Pressable key={n} testID={`star-${n}`} onPress={() => setRating(n)}>
                   <MaterialDesignIcons name={n <= rating ? "star" : "star-outline"} size={34} color={colors.warning} />
                 </Pressable>
               ))}
+            </View>
+            <View style={styles.satisInputRow}>
+              <Text style={styles.ratingLabelSm}>Pelayanan</Text>
+              <View style={{ flexDirection: "row", gap: 4 }}>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <Pressable key={n} testID={`star-pelayanan-${n}`} onPress={() => setRatingPelayanan(n)}>
+                    <MaterialDesignIcons name={n <= ratingPelayanan ? "star" : "star-outline"} size={24} color={colors.warning} />
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+            <View style={styles.satisInputRow}>
+              <Text style={styles.ratingLabelSm}>Pengiriman</Text>
+              <View style={{ flexDirection: "row", gap: 4 }}>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <Pressable key={n} testID={`star-pengiriman-${n}`} onPress={() => setRatingPengiriman(n)}>
+                    <MaterialDesignIcons name={n <= ratingPengiriman ? "star" : "star-outline"} size={24} color={colors.warning} />
+                  </Pressable>
+                ))}
+              </View>
             </View>
             <TextInput
               testID="review-komentar"
@@ -455,6 +478,9 @@ const useStyles = makeStyles((colors) => ({
   reminderTitle: { fontFamily: fonts.bodyMedium, fontSize: 15, color: colors.onSurface },
   reminderSub: { fontFamily: fonts.body, fontSize: 13, color: colors.muted, marginTop: 2, lineHeight: 18 },
   cardTitle: { fontFamily: fonts.heading, fontSize: 16, color: colors.onSurface },
+  ratingLabel: { fontFamily: fonts.bodyMedium, fontSize: 13, color: colors.onSurface, textAlign: "center", marginTop: 4 },
+  ratingLabelSm: { fontFamily: fonts.body, fontSize: 13, color: colors.onSurfaceSecondary },
+  satisInputRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 4 },
   itemRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   thumb: { width: 48, height: 48, borderRadius: 10, backgroundColor: colors.surfaceTertiary },
   thumbEmpty: { alignItems: "center", justifyContent: "center" },

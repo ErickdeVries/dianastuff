@@ -34,6 +34,11 @@ type RateRow = {
   type?: string;
   duration?: string;
   price?: number;
+  price_asli?: number;
+  subsidi?: number;
+  shipping_fee_discount?: number;
+  available_for_insurance?: boolean;
+  insurance_fee?: number;
 };
 
 export default function CheckoutScreen() {
@@ -58,6 +63,7 @@ export default function CheckoutScreen() {
   const [searching, setSearching] = useState(false);
   const [rates, setRates] = useState<RateRow[]>([]);
   const [selRate, setSelRate] = useState<RateRow | null>(null);
+  const [asuransi, setAsuransi] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [voucherInput, setVoucherInput] = useState("");
   const [voucherCode, setVoucherCode] = useState<string | null>(null);
@@ -105,7 +111,7 @@ export default function CheckoutScreen() {
           items: items.map((i) => ({
             name: i.nama_produk ?? "Produk",
             value: Math.round(i.harga ?? 10000),
-            length: 15, width: 15, height: 10, weight: 500,
+            weight: Math.max(1, Math.round(i.weight ?? 250)),
             quantity: i.qty,
           })),
         },
@@ -123,9 +129,12 @@ export default function CheckoutScreen() {
 
   const pickRate = (r: RateRow) => {    setSelRate(r);
     setOngkir(r.price ?? 0);
+    setAsuransi(false);
     const label = `${r.courier_name ?? r.company} ${r.courier_service_name ?? r.type ?? ""}`.trim();
     setKurir(label);
   };
+
+  const insuranceFee = asuransi && selRate?.available_for_insurance ? (selRate?.insurance_fee ?? 0) : 0;
 
   // Form -> map: geocode the typed address and move the pin there.
   const searchFromAddress = async () => {
@@ -160,7 +169,7 @@ export default function CheckoutScreen() {
     mutationFn: () =>
       apiRequest<{ valid: boolean; diskon: number; message: string }>("/api/voucher/validate", {
         method: "POST",
-        body: { kode: voucherInput.trim(), subtotal },
+        body: { kode: voucherInput.trim(), subtotal, ongkir },
       }),
     onSuccess: (res) => {
       if (res.valid) {
@@ -187,15 +196,35 @@ export default function CheckoutScreen() {
     setVoucherInput("");
   };
 
+  // Re-validate an applied voucher whenever shipping changes, because an
+  // ongkir-discount voucher's value depends on the selected courier price.
+  useEffect(() => {
+    if (!voucherCode) return;
+    let active = true;
+    apiRequest<{ valid: boolean; diskon: number; message: string }>("/api/voucher/validate", {
+      method: "POST",
+      body: { kode: voucherCode, subtotal, ongkir },
+    })
+      .then((res) => {
+        if (!active) return;
+        if (res.valid) setVoucherDiskon(res.diskon);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ongkir]);
+
   const createOrder = useMutation({
     mutationFn: () =>
       apiRequest<{ id: string; no_order: string }>("/api/orders", {
         method: "POST",
         body: {
-          items: items.map((i) => ({ product_id: i.product_id, qty: i.qty })),
+          items: items.map((i) => ({ product_id: i.product_id, qty: i.qty, variation_key: i.variation_key ?? null })),
           kurir,
           ongkir,
           voucher_code: voucherCode,
+          asuransi,
+          asuransi_fee: insuranceFee,
           shipping_coordinate: coord ? { latitude: coord.lat, longitude: coord.lng } : null,
           courier_company: selRate?.company ?? selRate?.courier_code ?? null,
           courier_type: selRate?.type ?? null,
@@ -209,7 +238,7 @@ export default function CheckoutScreen() {
     onError: (e) => setError(e instanceof ApiError ? e.message : "Gagal membuat pesanan."),
   });
 
-  const total = Math.max(0, subtotal - voucherDiskon) + ongkir;
+  const total = Math.max(0, subtotal + ongkir + insuranceFee - voucherDiskon);
 
   return (
     <View style={styles.root}>
@@ -308,17 +337,46 @@ export default function CheckoutScreen() {
             {rates.map((r, i) => {
               const label = `${r.courier_name ?? r.company} · ${r.courier_service_name ?? r.type ?? ""}`;
               const active = selRate === r;
+              const hasSubsidi = (r.subsidi ?? 0) > 0;
+              const kurirDiskon = (r.shipping_fee_discount ?? 0) > 0;
               return (
                 <Pressable key={i} testID={`rate-${i}`} onPress={() => pickRate(r)} style={[styles.kurirRow, active && styles.kurirRowActive]}>
                   <MaterialDesignIcons name={active ? "radiobox-marked" : "radiobox-blank"} size={22} color={active ? colors.brandPrimary : colors.muted} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.kurirText}>{label}</Text>
-                    {r.duration ? <Text style={styles.rateDur}>{r.duration}</Text> : null}
+                    <View style={styles.rateMetaRow}>
+                      {r.duration ? (
+                        <View style={styles.estChip}>
+                          <MaterialDesignIcons name="clock-outline" size={12} color={colors.brandPrimary} />
+                          <Text style={styles.estChipText}>Estimasi {r.duration}</Text>
+                        </View>
+                      ) : null}
+                      {hasSubsidi ? (
+                        <Text style={styles.subsidiBadge}>{(r.price ?? 0) === 0 ? "Gratis Ongkir" : "Ongkir disubsidi"}</Text>
+                      ) : null}
+                      {kurirDiskon ? (
+                        <Text style={styles.kurirDiscBadge}>Diskon kurir</Text>
+                      ) : null}
+                    </View>
                   </View>
-                  <Text style={styles.ratePrice}>{formatRupiah(r.price ?? 0)}</Text>
+                  <View style={{ alignItems: "flex-end" }}>
+                    <Text style={styles.ratePrice}>{(r.price ?? 0) === 0 ? "GRATIS" : formatRupiah(r.price ?? 0)}</Text>
+                    {hasSubsidi ? <Text style={styles.ratePriceStrike}>{formatRupiah(r.price_asli ?? 0)}</Text> : null}
+                    {kurirDiskon ? <Text style={styles.ratePriceStrike}>{formatRupiah((r.price ?? 0) + (r.shipping_fee_discount ?? 0))}</Text> : null}
+                  </View>
                 </Pressable>
               );
             })}
+            {selRate?.available_for_insurance ? (
+              <Pressable testID="asuransi-toggle" onPress={() => setAsuransi((v) => !v)} style={[styles.insuranceRow, asuransi && styles.insuranceRowActive]}>
+                <MaterialDesignIcons name={asuransi ? "checkbox-marked" : "checkbox-blank-outline"} size={22} color={asuransi ? colors.brandPrimary : colors.muted} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.kurirText}>Asuransikan paket</Text>
+                  <Text style={styles.rateDur}>Lindungi paket dari kerusakan/kehilangan</Text>
+                </View>
+                <Text style={styles.ratePrice}>{(selRate?.insurance_fee ?? 0) > 0 ? `+ ${formatRupiah(selRate?.insurance_fee ?? 0)}` : "Gratis"}</Text>
+              </Pressable>
+            ) : null}
             {ongkirMsg ? (
               <View style={styles.ongkirBox} testID="ongkir-msg">
                 <MaterialDesignIcons name="information-outline" size={18} color={colors.onBrandTertiary} />
@@ -380,7 +438,8 @@ export default function CheckoutScreen() {
               <Text style={styles.cardTitle}>Ringkasan Pembayaran</Text>
               <SummaryRow label="Subtotal" value={formatRupiah(subtotal)} />
               {voucherDiskon > 0 ? <SummaryRow label={`Diskon Voucher${voucherCode ? ` (${voucherCode})` : ""}`} value={`- ${formatRupiah(voucherDiskon)}`} /> : null}
-              <SummaryRow label={`Ongkir${kurir ? ` (${kurir})` : ""}`} value={ongkir > 0 ? formatRupiah(ongkir) : "Dikonfirmasi admin"} />
+              <SummaryRow label={`Ongkir${kurir ? ` (${kurir})` : ""}`} value={ongkir > 0 ? formatRupiah(ongkir) : (selRate ? "GRATIS" : "Dikonfirmasi admin")} />
+              {insuranceFee > 0 ? <SummaryRow label="Asuransi Pengiriman" value={formatRupiah(insuranceFee)} /> : null}
               <View style={styles.divider} />
               <SummaryRow label="Total" value={formatRupiah(total)} bold />
             </View>
@@ -462,6 +521,14 @@ const useStyles = makeStyles((colors) => ({
   kurirRowActive: { backgroundColor: colors.brandTertiary },
   kurirText: { fontFamily: fonts.bodyMedium, fontSize: 15, color: colors.onSurface },
   ongkirBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.brandTertiary, borderRadius: 12, padding: 12 },
+  rateMetaRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" },
+  estChip: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: colors.brandTertiary, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  estChipText: { fontFamily: fonts.bodyMedium, fontSize: 11, color: colors.brandPrimary },
+  subsidiBadge: { fontFamily: fonts.bodyMedium, fontSize: 11, color: "#fff", backgroundColor: colors.success, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, overflow: "hidden" },
+  kurirDiscBadge: { fontFamily: fonts.bodyMedium, fontSize: 11, color: "#fff", backgroundColor: colors.error, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, overflow: "hidden" },
+  ratePriceStrike: { fontFamily: fonts.body, fontSize: 11, color: colors.muted, textDecorationLine: "line-through" },
+  insuranceRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, marginTop: 4 },
+  insuranceRowActive: { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
   ongkirText: { flex: 1, fontFamily: fonts.body, fontSize: 13, color: colors.onBrandTertiary, lineHeight: 18 },
   mapHint: { fontFamily: fonts.body, fontSize: 12, color: colors.muted },
   coordText: { fontFamily: fonts.body, fontSize: 12, color: colors.brandPrimary },

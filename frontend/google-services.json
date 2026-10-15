@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "324303264011",
+    "project_id": "dianastuff77",
+    "storage_bucket": "dianastuff77.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:324303264011:android:4d66ce07620e2116e92a0e",
+        "android_client_info": {
+          "package_name": "com.dianastuff.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAEjyKjSrg8PQNJhOBr0BYIaDZ7ILmGRFs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

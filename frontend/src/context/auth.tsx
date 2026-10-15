@@ -12,6 +12,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { Platform } from "react-native";
 
 import { apiRequest, ApiError, clearToken, getToken, persistToken, setMemToken } from "@/src/api/client";
+import { registerForPush } from "@/src/utils/push";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -147,6 +148,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       sub.remove();
     };
   }, [exchangeSession, loadFromToken]);
+
+  // Register this device for push once a user is authenticated (native only).
+  useEffect(() => {
+    if (user?.user_id) registerForPush(user.user_id);
+  }, [user?.user_id]);
 
   const signInWithGoogle = useCallback(async () => {
     setSigningInGoogle(true);

@@ -23,7 +23,11 @@ type Product = {
   harga: number;
   harga_diskon?: number | null;
   harga_final: number;
+  harga_max?: number;
   diskon_persen: number;
+  has_variations?: boolean;
+  variations?: { name: string; options: string[] }[];
+  combinations?: { options: string[]; harga: number; harga_diskon?: number | null; stok: number; foto?: string | null }[];
   terjual: number;
   views: number;
   stok: number;
@@ -32,8 +36,8 @@ type Product = {
   foto_urls: string[];
 };
 
-type ReviewItem = { rating: number; komentar: string; foto_url?: string | null; nama: string; created_at: string | null };
-type Reviews = { average: number; count: number; items: ReviewItem[] };
+type ReviewItem = { rating: number; rating_pelayanan?: number | null; rating_pengiriman?: number | null; komentar: string; foto_url?: string | null; nama: string; created_at: string | null };
+type Reviews = { average: number; count: number; average_pelayanan?: number; average_pengiriman?: number; items: ReviewItem[] };
 
 const { width: SCREEN_W } = Dimensions.get("window");
 
@@ -50,6 +54,7 @@ export default function ProductDetail() {
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | undefined>(undefined);
+  const [selOpts, setSelOpts] = useState<Record<string, string>>({});
 
   const { data: product, isLoading } = useQuery<Product>({
     queryKey: ["product", id],
@@ -68,8 +73,27 @@ export default function ProductDetail() {
     apiRequest(`/api/products/${id}/view`, { method: "POST" }).catch(() => {});
   }, [id]);
 
+  const hasVar = !!(product?.has_variations && product?.variations?.length);
+  // All variation groups chosen? -> find the matching combination.
+  const selectedCombo = (() => {
+    if (!hasVar || !product) return null;
+    const groups = product.variations ?? [];
+    if (groups.some((g) => !selOpts[g.name])) return null;
+    const key = groups.map((g) => selOpts[g.name]).join("|");
+    return (product.combinations ?? []).find((c) => (c.options || []).join("|") === key) ?? null;
+  })();
+
+  const comboPrice = (c: { harga: number; harga_diskon?: number | null }) =>
+    c.harga_diskon && c.harga_diskon > 0 && c.harga_diskon < c.harga ? c.harga_diskon : c.harga;
+
   const photos = product?.foto_urls?.length ? product.foto_urls : [null];
-  const available = product ? product.bisa_po || product.stok > 0 : false;
+  const available = product
+    ? hasVar
+      ? selectedCombo
+        ? product.bisa_po || (selectedCombo.stok ?? 0) > 0
+        : product.bisa_po || product.stok > 0
+      : product.bisa_po || product.stok > 0
+    : false;
 
   const onShare = async () => {
     if (!product) return;
@@ -85,14 +109,25 @@ export default function ProductDetail() {
 
   const onAdd = () => {
     if (!product) return;
+    if (hasVar && !selectedCombo) {
+      toast.show("Pilih variasi dulu", "error");
+      return;
+    }
+    const price = hasVar && selectedCombo ? comboPrice(selectedCombo) : product.harga_final;
+    const foto = hasVar && selectedCombo?.foto ? selectedCombo.foto : product.foto_urls?.[0] ?? null;
+    const key = hasVar && selectedCombo ? (selectedCombo.options || []).join("|") : null;
+    const label = hasVar && selectedCombo ? (selectedCombo.options || []).join(", ") : null;
     addItem(
       {
         product_id: product.id,
         nama_produk: product.nama_produk,
-        harga: product.harga_final,
-        foto: product.foto_urls?.[0] ?? null,
-        stok: product.stok,
+        harga: price,
+        foto,
+        stok: hasVar && selectedCombo ? selectedCombo.stok : product.stok,
         bisa_po: product.bisa_po,
+        variation_key: key,
+        variation_label: label,
+        weight: product.berat_gram,
       },
       qty,
     );
@@ -162,7 +197,17 @@ export default function ProductDetail() {
             <>
               {product.kategori ? <Text style={styles.kategori}>{product.kategori}</Text> : null}
               <Text style={styles.name} testID="produk-nama">{product.nama_produk}</Text>
-              {product.diskon_persen > 0 ? (
+              {hasVar ? (
+                selectedCombo ? (
+                  <Text style={styles.price}>{formatRupiah(comboPrice(selectedCombo))}</Text>
+                ) : (
+                  <Text style={styles.price}>
+                    {product.harga_max && product.harga_max > product.harga_final
+                      ? `${formatRupiah(product.harga_final)} - ${formatRupiah(product.harga_max)}`
+                      : formatRupiah(product.harga_final)}
+                  </Text>
+                )
+              ) : product.diskon_persen > 0 ? (
                 <View style={styles.priceWrap}>
                   <Text style={styles.price}>{formatRupiah(product.harga_final)}</Text>
                   <View style={styles.discTag}><Text style={styles.discTagText}>-{product.diskon_persen}%</Text></View>
@@ -178,10 +223,34 @@ export default function ProductDetail() {
                 <MaterialDesignIcons name="eye-outline" size={15} color={colors.muted} />
                 <Text style={styles.soldText}>{product.views} dilihat</Text>
               </View>
+              {hasVar ? (
+                <View style={styles.varWrap}>
+                  {(product.variations ?? []).map((g) => (
+                    <View key={g.name} style={styles.varGroup}>
+                      <Text style={styles.varGroupName}>{g.name}</Text>
+                      <View style={styles.varChips}>
+                        {g.options.map((opt) => {
+                          const active = selOpts[g.name] === opt;
+                          return (
+                            <Pressable
+                              key={opt}
+                              testID={`var-${g.name}-${opt}`}
+                              onPress={() => setSelOpts((p) => ({ ...p, [g.name]: active ? "" : opt }))}
+                              style={[styles.varChip, active && styles.varChipActive]}
+                            >
+                              <Text style={[styles.varChipText, active && styles.varChipTextActive]}>{opt}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
               <View style={styles.metaRow}>
                 <View style={styles.metaChip}>
                   <MaterialDesignIcons name="package-variant-closed" size={16} color={colors.onSurfaceTertiary} />
-                  <Text style={styles.metaText}>Stok {product.stok}</Text>
+                  <Text style={styles.metaText}>Stok {hasVar ? (selectedCombo ? selectedCombo.stok : product.stok) : product.stok}</Text>
                 </View>
                 {product.berat_gram ? (
                   <View style={styles.metaChip}>
@@ -224,6 +293,22 @@ export default function ProductDetail() {
                   </View>
                 ) : null}
               </View>
+              {reviews && reviews.count > 0 && (reviews.average_pelayanan || reviews.average_pengiriman) ? (
+                <View style={styles.satisRow}>
+                  {reviews.average_pelayanan ? (
+                    <View style={styles.satisPill}>
+                      <MaterialDesignIcons name="account-heart-outline" size={14} color={colors.brandPrimary} />
+                      <Text style={styles.satisText}>Pelayanan {reviews.average_pelayanan}</Text>
+                    </View>
+                  ) : null}
+                  {reviews.average_pengiriman ? (
+                    <View style={styles.satisPill}>
+                      <MaterialDesignIcons name="truck-fast-outline" size={14} color={colors.brandPrimary} />
+                      <Text style={styles.satisText}>Pengiriman {reviews.average_pengiriman}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
               {reviews && reviews.count > 0 ? (
                 reviews.items.map((r, i) => (
                   <View key={i} style={styles.reviewCard} testID={`review-${i}`}>
@@ -235,6 +320,13 @@ export default function ProductDetail() {
                         ))}
                       </View>
                     </View>
+                    {r.rating_pelayanan || r.rating_pengiriman ? (
+                      <Text style={styles.reviewSatis}>
+                        {r.rating_pelayanan ? `Pelayanan ${r.rating_pelayanan}★` : ""}
+                        {r.rating_pelayanan && r.rating_pengiriman ? "  ·  " : ""}
+                        {r.rating_pengiriman ? `Pengiriman ${r.rating_pengiriman}★` : ""}
+                      </Text>
+                    ) : null}
                     {r.komentar ? <Text style={styles.reviewText}>{r.komentar}</Text> : null}
                     {r.foto_url ? (
                       <Pressable onPress={() => setViewerUri(resolveImageUrl(r.foto_url))}>
@@ -277,7 +369,7 @@ export default function ProductDetail() {
           >
             <Text style={styles.buyBtnLabel}>{available ? "Beli Sekarang" : "Stok Habis"}</Text>
             {available ? (
-              <Text style={styles.buyBtnPrice}>{formatRupiah(product.harga_final * qty)}</Text>
+              <Text style={styles.buyBtnPrice}>{formatRupiah((hasVar && selectedCombo ? comboPrice(selectedCombo) : product.harga_final) * qty)}</Text>
             ) : null}
           </Pressable>
         </View>
@@ -347,6 +439,14 @@ const useStyles = makeStyles((colors) => ({
   soldRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
   soldText: { fontFamily: fonts.body, fontSize: 13, color: colors.muted },
   soldDot: { fontFamily: fonts.body, fontSize: 13, color: colors.muted, marginHorizontal: 2 },
+  varWrap: { gap: 12, marginTop: 4 },
+  varGroup: { gap: 8 },
+  varGroupName: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.onSurface },
+  varChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  varChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
+  varChipActive: { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
+  varChipText: { fontFamily: fonts.bodyMedium, fontSize: 13, color: colors.onSurfaceTertiary },
+  varChipTextActive: { color: colors.brandPrimary },
   metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   metaChip: {
     flexDirection: "row",
@@ -371,6 +471,10 @@ const useStyles = makeStyles((colors) => ({
     borderRadius: 999,
   },
   ratingText: { fontFamily: fonts.bodyMedium, fontSize: 13, color: colors.onSurfaceTertiary },
+  satisRow: { flexDirection: "row", gap: 8, flexWrap: "wrap", marginBottom: 4 },
+  satisPill: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.surfaceSecondary, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+  satisText: { fontFamily: fonts.bodyMedium, fontSize: 12, color: colors.onSurface },
+  reviewSatis: { fontFamily: fonts.bodyMedium, fontSize: 12, color: colors.brandPrimary },
   reviewCard: {
     backgroundColor: colors.surfaceSecondary,
     borderRadius: 14,
