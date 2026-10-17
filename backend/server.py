@@ -1266,6 +1266,8 @@ OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "").rstrip("/")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 AI_VISION_MODEL = os.environ.get("AI_VISION_MODEL", "gemini-3-flash-preview")
 AI_IMAGE_MODEL = os.environ.get("AI_IMAGE_MODEL", "gemini-3.1-flash-image-preview")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
 
 _multi_modal_roles = None  # cached from first response
 
@@ -1288,6 +1290,35 @@ def _extract_json_obj(raw: str) -> dict:
     except Exception:
         m = re.search(r"\{.*\}", raw, flags=re.DOTALL)
         return json.loads(m.group(0)) if m else {}
+
+
+def _compat_response_text(resp: object) -> str:
+    """Extract text from common OpenAI-compatible chat response shapes."""
+    choices = getattr(resp, "choices", None) or []
+    if not choices:
+        return ""
+    message = getattr(choices[0], "message", None)
+    if message is None:
+        return str(getattr(choices[0], "text", None) or "")
+
+    content = getattr(message, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, dict):
+                value = part.get("text")
+                if isinstance(value, dict):
+                    value = value.get("value")
+            else:
+                value = getattr(part, "text", None)
+                if value is not None and not isinstance(value, str):
+                    value = getattr(value, "value", None)
+            if isinstance(value, str):
+                parts.append(value)
+        return "\n".join(parts)
+    return ""
 
 
 # --- OpenAI-compatible fallback paths --------------------------------------
@@ -1317,7 +1348,7 @@ def _compat_product_info(b64: str, mime: str = "image/jpeg") -> str:
         max_tokens=700,
         temperature=0.2,
     )
-    return resp.choices[0].message.content or ""
+    return _compat_response_text(resp)
 
 
 def _image_from_data_url(value: object) -> Optional[dict]:
@@ -1398,6 +1429,71 @@ def _compat_enhance_photo(b64: str, mime: str = "image/jpeg") -> tuple[str, list
     if images:
         return "", images
     raise HTTPException(status_code=502, detail="AI tidak menghasilkan foto")
+
+
+def _gemini_response_images(payload: object) -> list[dict]:
+    """Extract native Gemini inline image parts without logging image data."""
+    if not isinstance(payload, dict):
+        return []
+    found: list[dict] = []
+    for candidate in payload.get("candidates") or []:
+        if not isinstance(candidate, dict):
+            continue
+        content = candidate.get("content") or {}
+        for part in content.get("parts") or []:
+            if not isinstance(part, dict):
+                continue
+            inline = part.get("inlineData") or part.get("inline_data")
+            if not isinstance(inline, dict):
+                continue
+            data = inline.get("data")
+            mime_type = inline.get("mimeType") or inline.get("mime_type") or "image/png"
+            if isinstance(data, str) and data:
+                found.append({"data": data, "mime_type": mime_type})
+    return found
+
+
+def _gemini_enhance_photo(b64: str, mime: str = "image/jpeg") -> list[dict]:
+    """Edit a product image through Google's native Gemini generateContent API."""
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", GEMINI_IMAGE_MODEL):
+        raise HTTPException(status_code=500, detail="Model Gemini tidak valid")
+    prompt = (
+        "Edit this product photo into a clean, professional e-commerce advertising photo suitable "
+        "for an online shop listing. Replace only the background with a soft neutral studio setting, "
+        "bright even lighting, and a subtle natural shadow. Remove clutter. Preserve the product "
+        "exactly: same shape, proportions, color, texture, pattern, text, and logo. Do not add or "
+        "remove product details. Center the product in a square, realistic composition."
+    )
+    url = (
+        "https://generativelanguage.googleapis.com/v1/models/"
+        f"{GEMINI_IMAGE_MODEL}:generateContent"
+    )
+    try:
+        response = requests.post(
+            url,
+            headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
+            json={
+                "contents": [{"role": "user", "parts": [
+                    {"text": prompt},
+                    {"inlineData": {"mimeType": mime, "data": b64}},
+                ]}],
+                "generationConfig": {"responseModalities": ["IMAGE"]},
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        images = _gemini_response_images(response.json())
+    except requests.RequestException as e:
+        status = e.response.status_code if e.response is not None else None
+        logger.error("Gemini image edit request failed (status=%s, type=%s)", status, type(e).__name__)
+        raise HTTPException(status_code=502, detail="Gagal memproses foto dengan Gemini")
+    except (TypeError, ValueError) as e:
+        logger.error("Gemini image edit response invalid (type=%s)", type(e).__name__)
+        raise HTTPException(status_code=502, detail="Respons Gemini tidak valid")
+    if not images:
+        logger.warning("Gemini image edit returned no image (model=%s)", GEMINI_IMAGE_MODEL)
+        raise HTTPException(status_code=502, detail="Gemini tidak menghasilkan foto")
+    return images
 def _storage_path_from_url(foto_url: str) -> Optional[str]:
     """Resolve an app photo reference to its object-storage path."""
     if not foto_url:
@@ -1441,6 +1537,20 @@ async def ai_product_info(payload: AiPhotoIn, admin: dict = Depends(require_admi
         try:
             raw = await run_in_threadpool(_compat_product_info, b64, mime)
             data = _extract_json_obj(raw)
+            if not isinstance(data, dict) or not any(
+                str(data.get(key) or "").strip()
+                for key in ("nama_produk", "deskripsi", "kategori")
+            ):
+                logger.warning(
+                    "OpenAI-compatible product-info returned no usable fields "
+                    "(model=%s, content_length=%d)",
+                    AI_VISION_MODEL,
+                    len(raw),
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail="AI tidak menghasilkan data produk yang valid",
+                )
         except HTTPException:
             raise
         except Exception as e:
@@ -1498,14 +1608,16 @@ async def ai_product_info(payload: AiPhotoIn, admin: dict = Depends(require_admi
 
 @api_router.post("/admin/ai/enhance-photo")
 async def ai_enhance_photo(payload: AiPhotoIn, admin: dict = Depends(require_admin)):
-    if not _use_openai_compat() and not EMERGENT_KEY:
+    if not GEMINI_API_KEY and not _use_openai_compat() and not EMERGENT_KEY:
         raise HTTPException(status_code=503, detail="AI belum dikonfigurasi")
     try:
         b64, mime = await run_in_threadpool(_load_image_b64, payload.foto_url)
     except Exception:
         raise HTTPException(status_code=400, detail="Foto tidak dapat dibaca")
 
-    if _use_openai_compat():
+    if GEMINI_API_KEY:
+        images = await run_in_threadpool(_gemini_enhance_photo, b64, mime)
+    elif _use_openai_compat():
         _text, images = await run_in_threadpool(_compat_enhance_photo, b64, mime)
     else:
         from emergentintegrations.llm.chat import ImageContent, LlmChat, UserMessage

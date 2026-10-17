@@ -29,6 +29,8 @@ backend/.env
 
 # --- Local tooling / archives (exclude from context) ---
 .venv/
+backend/.venv/
+backend/.pytest-tmp/
 venv/
 __pycache__/
 .pytest_cache/
