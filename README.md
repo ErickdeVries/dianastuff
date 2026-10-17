@@ -1,58 +1,58 @@
 # Diana Stuff
 
-Aplikasi e-commerce single-tenant (React Native Expo + FastAPI + MongoDB) untuk toko **Diana Stuff**. Mendukung login Google & whitelist, dashboard admin (produk, pelanggan, pesanan, pengaturan toko), etalase & checkout pembeli, serta chat realtime (Socket.IO).
+Aplikasi e-commerce single-tenant berbasis Expo/React Native, FastAPI, dan MongoDB. Satu source frontend digunakan untuk web dan Android, dengan login Google/whitelist, dashboard admin, katalog, checkout, pesanan, unggah gambar, dan chat Socket.IO.
 
-## Tech Stack
-- **Frontend**: Expo (React Native) + Expo Router, React Query, Socket.IO client, react-native-webview
-- **Backend**: FastAPI + Motor (MongoDB), Socket.IO (python-socketio), Emergent Object Storage untuk gambar
-- **DB**: MongoDB
+## Arsitektur aktif
+
+- Web: Cloudflare Pages di `www.dianastuff.com`
+- API dan Socket.IO: `https://dianastuff.helipod.app`
+- Database: MongoDB Atlas, database `dianastuff`
+- Android: Expo/EAS, application id `com.dianastuff.app`
+
+Source ini berasal dari proyek Emergent, tetapi konfigurasi aktifnya sudah dimigrasikan. Referensi Emergent yang masih ada di kode hanya dipertahankan sebagai kompatibilitas/fallback dan bukan petunjuk deployment.
 
 ## Struktur
-```
-/app
-├── backend/          # FastAPI (server.py) + .env
-└── frontend/         # Expo app (app/ routes, src/ komponen & util)
+
+```text
+backend/          FastAPI, Socket.IO, integrasi storage/Biteship/AI
+frontend/         Expo Router untuk web dan Android
+landing/          aset landing terkait proyek
+scripts/          utilitas setup repository
 ```
 
-## Menjalankan Backend
+## Setup lokal atau Codex web
+
 ```bash
-cd backend
-pip install -r requirements.txt
-# .env wajib berisi:
-#   MONGO_URL=mongodb://localhost:27017
-#   DB_NAME=test_database
-#   EMERGENT_LLM_KEY=...            # untuk Object Storage upload gambar
-uvicorn server:app --host 0.0.0.0 --port 8001 --reload
+bash scripts/codex-setup.sh
 ```
-Semua route diawali `/api`. Socket.IO berjalan di path `/api/socket.io`.
-Saat startup, data contoh otomatis di-seed (profil toko, 1 admin, 1 buyer, 3 produk baju).
 
-## Menjalankan Frontend
+Untuk pekerjaan frontend saja:
+
+```bash
+DIANASTUFF_SKIP_BACKEND=1 bash scripts/codex-setup.sh
+```
+
+Masukkan konfigurasi runtime melalui environment variables atau secret store, jangan ke Git. Minimum backend adalah `MONGO_URL` dan `DB_NAME`. Frontend memakai `EXPO_PUBLIC_BACKEND_URL`.
+
+## Menjalankan dan memeriksa frontend
+
 ```bash
 cd frontend
-yarn install
-# .env wajib berisi:
-#   EXPO_PUBLIC_BACKEND_URL=https://<host-backend-anda>
-yarn start        # lalu tekan w (web) / scan QR untuk Expo Go
+EXPO_PUBLIC_BACKEND_URL=https://dianastuff.helipod.app yarn web
+yarn lint
+EXPO_PUBLIC_BACKEND_URL=https://dianastuff.helipod.app yarn export:web
 ```
 
-## Akun Demo (seed)
-| Peran | Username | Password |
-|-------|----------|----------|
-| Admin | `admin`  | `admin123` |
-| Buyer | `buyer`  | `buyer123` |
+Hasil export berada di `frontend/dist`. Skrip export menambahkan fallback SPA Cloudflare `/* /index.html 200`.
 
-Login Gmail memakai Emergent Google OAuth (tanpa password aplikasi).
+## Menjalankan backend
 
-## Fitur Utama
-- **Auth**: Login Gmail (Google) + Whitelist (username/password, daftar -> approval admin)
-- **Admin Dashboard** (`/dashboard`, khusus admin): statistik, CRUD produk (upload s/d 5 foto), CRUD pelanggan, manajemen pesanan (ubah status, input resi), pengaturan toko (logo/banner/rekening/WA), chat.
-- **Buyer**: etalase `/toko` (grid, cari, filter kategori) -> detail `/produk/[id]` (slider foto) -> keranjang `/keranjang` -> checkout 3 langkah `/checkout` (alamat, kurir + cek ongkir, transfer manual) -> `/order/[id]` (stepper status ala Shopee, konfirmasi bayar via WhatsApp, upload bukti, beri ulasan).
-- **Chat realtime** (`/chat`) 1-1 admin <-> buyer via Socket.IO (teks + gambar).
-- **WebView** (`/webview`) untuk membuka versi web `/toko`, `/produk/[id]`, `/checkout` di dalam app.
+```bash
+.venv/bin/uvicorn backend.server:app --host 0.0.0.0 --port 8001 --reload
+```
 
-## Koleksi MongoDB
-`users`, `profil_admin`, `products`, `orders`, `chats`, `ongkir_manual`, `user_sessions`
+Semua REST route aplikasi memakai prefix `/api`; Socket.IO memakai path `/api/socket.io`. Jangan menjalankan pengujian yang mengubah data production tanpa persetujuan eksplisit.
 
-## Deploy
-Gunakan tombol **Publish** pada platform Emergent untuk deploy backend + generate build iOS/Android. Jangan mengubah `frontend/eas.json` (dikelola platform) maupun variabel env yang dilindungi.
+## Deployment
+
+Deployment web, backend, database, dan Android dilakukan secara terpisah. Push ke `main` juga menjalankan workflow image backend ke GitHub Container Registry. Karena itu perubahan sebaiknya melalui branch dan review sebelum merge. Detail aturan kerja dan verifikasi tersedia di `AGENTS.md`.

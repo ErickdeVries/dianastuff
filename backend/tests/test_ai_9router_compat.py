@@ -42,3 +42,73 @@ def test_product_info_json_extraction():
     )
     assert data["nama_produk"] == "Tas Baru"
     assert data["deskripsi"] == "Deskripsi AI"
+
+
+def test_product_info_normalizes_english_aliases():
+    data = server._normalize_product_info({
+        "product_name": "Tas Baru",
+        "description": "Deskripsi AI",
+        "category": "Tas",
+    })
+    assert data == {
+        "nama_produk": "Tas Baru",
+        "deskripsi": "Deskripsi AI",
+        "kategori": "Tas",
+    }
+
+
+def test_product_info_normalization_ignores_non_string_values():
+    data = server._normalize_product_info({
+        "nama_produk": {"value": "Tas Baru"},
+        "deskripsi": None,
+        "kategori": " Tas ",
+    })
+    assert data == {"kategori": "Tas"}
+
+
+def test_compat_response_text_accepts_plain_string():
+    result = server._compat_response_text(
+        _response_with(content='{"nama_produk":"Tas Baru"}')
+    )
+    assert result == '{"nama_produk":"Tas Baru"}'
+
+
+def test_compat_response_text_accepts_content_parts():
+    result = server._compat_response_text(
+        _response_with(content=[
+            {"type": "text", "text": '{"nama_produk":"Tas Baru",'},
+            SimpleNamespace(text='"kategori":"Tas"}'),
+        ])
+    )
+    assert result == '{"nama_produk":"Tas Baru",\n"kategori":"Tas"}'
+
+
+def test_compat_response_text_handles_empty_choices():
+    assert server._compat_response_text(SimpleNamespace(choices=[])) == ""
+
+
+def test_gemini_response_images_accepts_camel_case_inline_data():
+    result = server._gemini_response_images({
+        "candidates": [{"content": {"parts": [{
+            "inlineData": {"mimeType": "image/png", "data": "aGVsbG8="}
+        }]}}]
+    })
+    assert result == [{"data": "aGVsbG8=", "mime_type": "image/png"}]
+
+
+def test_gemini_response_images_ignores_text_parts():
+    result = server._gemini_response_images({
+        "candidates": [{"content": {"parts": [{"text": "done"}]}}]
+    })
+    assert result == []
+
+
+def test_gemini_response_text_collects_candidate_parts():
+    result = server._gemini_response_text({
+        "candidates": [{"content": {"parts": [
+            {"text": '{"nama_produk":"Tas Baru",'},
+            {"text": '"kategori":"Tas"}'},
+            {"inlineData": {"mimeType": "image/png", "data": "ignored"}},
+        ]}}]
+    })
+    assert result == '{"nama_produk":"Tas Baru",\n"kategori":"Tas"}'

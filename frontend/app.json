@@ -2,9 +2,9 @@
   "expo": {
     "name": "dianastuff",
     "slug": "frontend",
-    "version": "1.0.14",
+    "version": "1.0.15",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/dianastuff-icon.png",
     "scheme": "frontend",
     "userInterfaceStyle": "automatic",
     "ios": {
@@ -19,11 +19,11 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "foregroundImage": "./assets/images/dianastuff-icon.png",
+        "backgroundColor": "#F7F0FF"
       },
       "package": "com.dianastuff.app",
-      "versionCode": 14,
+      "versionCode": 15,
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.READ_MEDIA_IMAGES",
@@ -49,10 +49,10 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-image.png",
+          "image": "./assets/images/dianastuff-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "backgroundColor": "#F7F0FF"
         }
       ],
       "expo-font",
