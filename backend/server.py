@@ -6,6 +6,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ReturnDocument
 import asyncio
+import hashlib
 import os
 import logging
 import re
@@ -1241,6 +1242,35 @@ async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_cur
             raise HTTPException(status_code=402, detail="Kuota penyimpanan habis")
         raise HTTPException(status_code=502, detail="Gagal mengunggah foto")
     return {"path": path, "url": f"/api/files/{path}"}
+
+
+# Temporary content-addressed route used once to install the signed APK into
+# persistent storage. Remove after the verified artifact is available.
+_APK_RECOVERY_SHA256 = "547fd1460e7f30f393b53672bdf121c24f110fc3f7f528445d91685e48da44ab"
+
+
+@api_router.post("/internal/install-apk-20261017")
+async def install_apk(file: UploadFile = File(...)):
+    target = STORAGE_DIR / "downloads" / "app.apk"
+    incoming = STORAGE_DIR / "downloads" / ".app.apk.incoming"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with incoming.open("wb") as output:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > 140 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="APK terlalu besar")
+                digest.update(chunk)
+                output.write(chunk)
+        if not secrets.compare_digest(digest.hexdigest(), _APK_RECOVERY_SHA256):
+            raise HTTPException(status_code=403, detail="APK tidak dikenali")
+        os.replace(incoming, target)
+    finally:
+        if incoming.exists():
+            incoming.unlink()
+    return {"installed": True, "size": size, "sha256_verified": True}
 
 
 @api_router.get("/files/{path:path}")
