@@ -1247,30 +1247,55 @@ async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_cur
 # Temporary content-addressed route used once to install the signed APK into
 # persistent storage. Remove after the verified artifact is available.
 _APK_RECOVERY_SHA256 = "547fd1460e7f30f393b53672bdf121c24f110fc3f7f528445d91685e48da44ab"
+_APK_PART_SHA256 = {
+    0: "057d47f4d90179d57df3ff4a9dc6612d9635c69ea190420774fac35762135ed2",
+    1: "4f8365ace2b9a5964a5fff70d8d4e472fef82fb29881f539d929998227067178",
+}
 
 
-@api_router.post("/internal/install-apk-20261017")
-async def install_apk(file: UploadFile = File(...)):
+@api_router.post("/internal/install-apk-20261017/{part}")
+async def install_apk(part: int, file: UploadFile = File(...)):
+    if part not in _APK_PART_SHA256:
+        raise HTTPException(status_code=404, detail="Bagian APK tidak dikenali")
     target = STORAGE_DIR / "downloads" / "app.apk"
     incoming = STORAGE_DIR / "downloads" / ".app.apk.incoming"
+    part_path = STORAGE_DIR / "downloads" / f".app.apk.part{part}"
     target.parent.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256()
     size = 0
     try:
-        with incoming.open("wb") as output:
+        with part_path.open("wb") as output:
             while chunk := await file.read(1024 * 1024):
                 size += len(chunk)
-                if size > 140 * 1024 * 1024:
-                    raise HTTPException(status_code=413, detail="APK terlalu besar")
+                if size > 75 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="Bagian APK terlalu besar")
                 digest.update(chunk)
                 output.write(chunk)
-        if not secrets.compare_digest(digest.hexdigest(), _APK_RECOVERY_SHA256):
-            raise HTTPException(status_code=403, detail="APK tidak dikenali")
-        os.replace(incoming, target)
-    finally:
-        if incoming.exists():
-            incoming.unlink()
-    return {"installed": True, "size": size, "sha256_verified": True}
+        if not secrets.compare_digest(digest.hexdigest(), _APK_PART_SHA256[part]):
+            raise HTTPException(status_code=403, detail="Bagian APK tidak dikenali")
+    except Exception:
+        if part_path.exists():
+            part_path.unlink()
+        raise
+
+    parts = [STORAGE_DIR / "downloads" / f".app.apk.part{i}" for i in range(2)]
+    if not all(path.exists() for path in parts):
+        return {"installed": False, "part": part, "size": size, "sha256_verified": True}
+
+    final_digest = hashlib.sha256()
+    with incoming.open("wb") as output:
+        for path in parts:
+            with path.open("rb") as source:
+                while chunk := source.read(1024 * 1024):
+                    final_digest.update(chunk)
+                    output.write(chunk)
+    if not secrets.compare_digest(final_digest.hexdigest(), _APK_RECOVERY_SHA256):
+        incoming.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="APK gabungan tidak valid")
+    os.replace(incoming, target)
+    for path in parts:
+        path.unlink(missing_ok=True)
+    return {"installed": True, "size": target.stat().st_size, "sha256_verified": True}
 
 
 @api_router.get("/files/{path:path}")
