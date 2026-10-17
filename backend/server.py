@@ -1512,7 +1512,10 @@ def _gemini_product_info(b64: str, mime: str = "image/jpeg") -> str:
                 ]}],
                 "generationConfig": {
                     "temperature": 0.2,
-                    "maxOutputTokens": 700,
+                    # Gemini 3 counts thought tokens toward this cap. Keep reasoning
+                    # low and leave enough room for the complete structured payload.
+                    "maxOutputTokens": 2048,
+                    "thinkingConfig": {"thinkingLevel": "low"},
                     "responseMimeType": "application/json",
                     "responseJsonSchema": {
                         "type": "object",
