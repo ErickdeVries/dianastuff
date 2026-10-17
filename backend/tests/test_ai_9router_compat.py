@@ -79,3 +79,14 @@ def test_gemini_response_images_ignores_text_parts():
         "candidates": [{"content": {"parts": [{"text": "done"}]}}]
     })
     assert result == []
+
+
+def test_gemini_response_text_collects_candidate_parts():
+    result = server._gemini_response_text({
+        "candidates": [{"content": {"parts": [
+            {"text": '{"nama_produk":"Tas Baru",'},
+            {"text": '"kategori":"Tas"}'},
+            {"inlineData": {"mimeType": "image/png", "data": "ignored"}},
+        ]}}]
+    })
+    assert result == '{"nama_produk":"Tas Baru",\n"kategori":"Tas"}'

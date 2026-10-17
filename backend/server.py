@@ -1257,16 +1257,15 @@ async def serve_file(path: str):
 # ---------------------------------------------------------------------------
 # AI (Emergent LLM key | OpenAI-compatible fallback, e.g. 9Router)
 # ---------------------------------------------------------------------------
-# Priority: EMERGENT_LLM_KEY present & provider reachable -> Emergent LlmChat.
-# Otherwise -> OpenAI-compatible chat-completions at OPENAI_BASE_URL with
-# OPENAI_API_KEY. Set both and the OpenAI-compatible path wins, so migration
-# to 9Router later is a pure env swap. Vision on the fallback path is handled
-# by the base_url provider through the standard image_url content part.
+# Product vision/image editing prefers the native Gemini API when
+# GEMINI_API_KEY is present. Otherwise the OpenAI-compatible endpoint at
+# OPENAI_BASE_URL is used, followed by the legacy Emergent integration.
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "").rstrip("/")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 AI_VISION_MODEL = os.environ.get("AI_VISION_MODEL", "gemini-3-flash-preview")
 AI_IMAGE_MODEL = os.environ.get("AI_IMAGE_MODEL", "gemini-3.1-flash-image-preview")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_VISION_MODEL = os.environ.get("GEMINI_VISION_MODEL", "gemini-3-flash-preview")
 GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
 
 _multi_modal_roles = None  # cached from first response
@@ -1453,6 +1452,64 @@ def _gemini_response_images(payload: object) -> list[dict]:
     return found
 
 
+def _gemini_response_text(payload: object) -> str:
+    """Extract text parts from a native Gemini generateContent response."""
+    if not isinstance(payload, dict):
+        return ""
+    parts: list[str] = []
+    for candidate in payload.get("candidates") or []:
+        if not isinstance(candidate, dict):
+            continue
+        content = candidate.get("content") or {}
+        for part in content.get("parts") or []:
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                parts.append(part["text"])
+    return "\n".join(parts)
+
+
+def _gemini_product_info(b64: str, mime: str = "image/jpeg") -> str:
+    """Generate catalog fields through Google's native Gemini API."""
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", GEMINI_VISION_MODEL):
+        raise HTTPException(status_code=500, detail="Model Gemini vision tidak valid")
+    prompt = (
+        "Anda asisten katalog toko online fashion di Indonesia. Lihat foto produk lalu buat data "
+        "produk dalam Bahasa Indonesia yang menjual. Balas HANYA JSON valid tanpa markdown dengan "
+        "kunci persis: nama_produk (singkat, maksimal 8 kata), deskripsi (2-4 kalimat), dan kategori "
+        "(satu kata atau frasa singkat). Sebut bahan, warna, model, dan kegunaan hanya jika terlihat. "
+        "Jangan mengarang harga."
+    )
+    url = (
+        "https://generativelanguage.googleapis.com/v1/models/"
+        f"{GEMINI_VISION_MODEL}:generateContent"
+    )
+    try:
+        response = requests.post(
+            url,
+            headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
+            json={
+                "contents": [{"role": "user", "parts": [
+                    {"text": prompt},
+                    {"inlineData": {"mimeType": mime, "data": b64}},
+                ]}],
+                "generationConfig": {
+                    "temperature": 0.2,
+                    "maxOutputTokens": 700,
+                    "responseMimeType": "application/json",
+                },
+            },
+            timeout=90,
+        )
+        response.raise_for_status()
+        return _gemini_response_text(response.json())
+    except requests.RequestException as e:
+        status = e.response.status_code if e.response is not None else None
+        logger.error("Gemini product-info request failed (status=%s, type=%s)", status, type(e).__name__)
+        raise HTTPException(status_code=502, detail="Gagal membuat data dengan Gemini")
+    except (TypeError, ValueError) as e:
+        logger.error("Gemini product-info response invalid (type=%s)", type(e).__name__)
+        raise HTTPException(status_code=502, detail="Respons Gemini tidak valid")
+
+
 def _gemini_enhance_photo(b64: str, mime: str = "image/jpeg") -> list[dict]:
     """Edit a product image through Google's native Gemini generateContent API."""
     if not re.fullmatch(r"[A-Za-z0-9._-]+", GEMINI_IMAGE_MODEL):
@@ -1526,25 +1583,33 @@ class AiPhotoIn(BaseModel):
 
 @api_router.post("/admin/ai/product-info")
 async def ai_product_info(payload: AiPhotoIn, admin: dict = Depends(require_admin)):
-    if not _use_openai_compat() and not EMERGENT_KEY:
+    if not GEMINI_API_KEY and not _use_openai_compat() and not EMERGENT_KEY:
         raise HTTPException(status_code=503, detail="AI belum dikonfigurasi")
     try:
         b64, mime = await run_in_threadpool(_load_image_b64, payload.foto_url)
     except Exception:
         raise HTTPException(status_code=400, detail="Foto tidak dapat dibaca")
 
-    if _use_openai_compat():
+    if GEMINI_API_KEY or _use_openai_compat():
         try:
-            raw = await run_in_threadpool(_compat_product_info, b64, mime)
+            if GEMINI_API_KEY:
+                raw = await run_in_threadpool(_gemini_product_info, b64, mime)
+                provider = "Gemini"
+                model = GEMINI_VISION_MODEL
+            else:
+                raw = await run_in_threadpool(_compat_product_info, b64, mime)
+                provider = "OpenAI-compatible"
+                model = AI_VISION_MODEL
             data = _extract_json_obj(raw)
             if not isinstance(data, dict) or not any(
                 str(data.get(key) or "").strip()
                 for key in ("nama_produk", "deskripsi", "kategori")
             ):
                 logger.warning(
-                    "OpenAI-compatible product-info returned no usable fields "
+                    "%s product-info returned no usable fields "
                     "(model=%s, content_length=%d)",
-                    AI_VISION_MODEL,
+                    provider,
+                    model,
                     len(raw),
                 )
                 raise HTTPException(
