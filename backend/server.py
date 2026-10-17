@@ -6,6 +6,8 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ReturnDocument
 import asyncio
+import hashlib
+import io
 import os
 import logging
 import re
@@ -18,6 +20,7 @@ import bcrypt
 import httpx
 import requests
 import socketio
+import zipfile
 from pathlib import Path
 from urllib.parse import quote
 from pydantic import BaseModel, Field
@@ -1241,6 +1244,41 @@ async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_cur
             raise HTTPException(status_code=402, detail="Kuota penyimpanan habis")
         raise HTTPException(status_code=502, detail="Gagal mengunggah foto")
     return {"path": path, "url": f"/api/files/{path}"}
+
+
+# Temporary, content-addressed recovery route. Remove immediately after the
+# verified legacy-image archive has been restored to persistent storage.
+_RECOVERY_ARCHIVE_SHA256 = "37c0c246488fff09420b8f6f5266134eec3564ef5156af232e00839e15704321"
+
+
+@api_router.post("/internal/recover-legacy-images-20261017")
+async def recover_legacy_images(file: UploadFile = File(...)):
+    content = await file.read()
+    if len(content) > 40 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Arsip recovery terlalu besar")
+    if not secrets.compare_digest(hashlib.sha256(content).hexdigest(), _RECOVERY_ARCHIVE_SHA256):
+        raise HTTPException(status_code=403, detail="Arsip recovery tidak dikenali")
+
+    restored = 0
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            files = [item for item in archive.infolist() if not item.is_dir()]
+            if len(files) != 80:
+                raise ValueError("unexpected recovery file count")
+            for item in files:
+                path = item.filename.replace("\\", "/").lstrip("/")
+                if (
+                    not path.startswith(f"{APP_NAME}/uploads/")
+                    or not path.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+                    or ".." in Path(path).parts
+                ):
+                    raise ValueError("invalid recovery path")
+                data = archive.read(item)
+                await run_in_threadpool(put_object, path, data, "image/jpeg")
+                restored += 1
+    except (ValueError, zipfile.BadZipFile, KeyError):
+        raise HTTPException(status_code=400, detail="Isi arsip recovery tidak valid")
+    return {"restored": restored, "sha256_verified": True}
 
 
 @api_router.get("/files/{path:path}")
