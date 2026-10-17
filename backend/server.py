@@ -1479,7 +1479,7 @@ def _gemini_product_info(b64: str, mime: str = "image/jpeg") -> str:
         "Jangan mengarang harga."
     )
     url = (
-        "https://generativelanguage.googleapis.com/v1/models/"
+        "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{GEMINI_VISION_MODEL}:generateContent"
     )
     try:
