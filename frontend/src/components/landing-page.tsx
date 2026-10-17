@@ -28,8 +28,8 @@ const FEATURES = [
 ];
 
 // Link download APK Android langsung dari CDN aset.
-const APK_URL = "https://diana-store-2.emergent.host/api/download/app.apk";
-const APK_VERSION = "1.0.13";
+const APK_URL = "https://dianastuff.helipod.app/api/download/app.apk";
+const APK_VERSION = "1.0.14";
 
 const INSTALL_STEPS = [
   "Tekan tombol “Unduh APK Android”, lalu buka file yang terunduh.",

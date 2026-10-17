@@ -88,3 +88,6 @@ credentials.json
 *.key
 .credentials
 _arsip/
+/.tools/
+/database-backups/
+/*.apk

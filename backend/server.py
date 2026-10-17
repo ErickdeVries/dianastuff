@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ReturnDocument
+import asyncio
 import os
 import logging
 import re
@@ -52,8 +53,14 @@ SESSION_DAYS = 7
 DEFAULT_WHATSAPP = "6285312812452"
 
 # ---------------------------------------------------------------------------
-# Emergent Object Storage
+# Object storage — provider abstraction (local disk | S3 | Emergent legacy)
 # ---------------------------------------------------------------------------
+# STORAGE_PROVIDER=local (default): files on disk under STORAGE_DIR (volume).
+# STORAGE_PROVIDER=s3:          S3-compatible via AWS_* env (boto3).
+# STORAGE_PROVIDER=emergent:    legacy Emergent object storage (integrations...).
+# Switching provider later = change env only, zero code changes.
+STORAGE_PROVIDER = (os.environ.get("STORAGE_PROVIDER") or "local").strip().lower()
+STORAGE_DIR = Path(os.environ.get("STORAGE_DIR") or (ROOT_DIR / "uploads"))
 STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
 STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
 EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
@@ -63,6 +70,72 @@ APP_NAME = "diana-stuff"
 _storage_key: Optional[str] = None
 
 
+def _local_path(path: str) -> Path:
+    # Keep paths inside the storage root (no traversal) and mirror the old
+    # flat key layout so existing references (/api/files/<path>) keep working.
+    clean = path.lstrip("/")
+    target = (STORAGE_DIR / clean).resolve()
+    if not str(target).startswith(str(STORAGE_DIR.resolve())):
+        raise ValueError("invalid storage path")
+    return target
+
+
+def _storage_backend() -> str:
+    p = STORAGE_PROVIDER
+    if p in ("local", "s3", "emergent"):
+        return p
+    logger.warning(f"Unknown STORAGE_PROVIDER '{p}', falling back to local")
+    return "local"
+
+
+# --- local disk -----------------------------------------------------------
+def _local_put(path: str, data: bytes, content_type: str) -> dict:
+    target = _local_path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    return {"path": path, "size": len(data), "content_type": content_type}
+
+
+def _local_get(path: str) -> tuple[bytes, str]:
+    target = _local_path(path)
+    if not target.is_file():
+        raise FileNotFoundError(path)
+    return target.read_bytes(), "image/jpeg"
+
+
+# --- S3-compatible --------------------------------------------------------
+_s3_client = None
+
+
+def _s3() -> "boto3.client":
+    global _s3_client
+    if _s3_client is None:
+        import boto3
+        _s3_client = boto3.client(
+            "s3",
+            endpoint_url=os.environ.get("S3_ENDPOINT_URL") or None,
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            region_name=os.environ.get("AWS_REGION") or "auto",
+        )
+    return _s3_client
+
+
+def _s3_bucket() -> str:
+    return os.environ.get("S3_BUCKET", "dianastuff")
+
+
+def _s3_put(path: str, data: bytes, content_type: str) -> dict:
+    _s3().put_object(Bucket=_s3_bucket(), Key=path.lstrip("/"), Body=data, ContentType=content_type)
+    return {"path": path, "size": len(data), "content_type": content_type}
+
+
+def _s3_get(path: str) -> tuple[bytes, str]:
+    obj = _s3().get_object(Bucket=_s3_bucket(), Key=path.lstrip("/"))
+    return obj["Body"].read(), obj.get("ContentType", "application/octet-stream")
+
+
+# --- Emergent legacy ------------------------------------------------------
 def init_storage() -> str:
     global _storage_key
     if _storage_key:
@@ -73,7 +146,7 @@ def init_storage() -> str:
     return _storage_key
 
 
-def put_object(path: str, data: bytes, content_type: str) -> dict:
+def _emergent_put(path: str, data: bytes, content_type: str) -> dict:
     key = init_storage()
     resp = requests.put(
         f"{STORAGE_URL}/objects/{path}",
@@ -85,7 +158,7 @@ def put_object(path: str, data: bytes, content_type: str) -> dict:
     return resp.json()
 
 
-def get_object(path: str) -> tuple[bytes, str]:
+def _emergent_get(path: str) -> tuple[bytes, str]:
     global _storage_key
     key = init_storage()
     resp = requests.get(
@@ -103,6 +176,25 @@ def get_object(path: str) -> tuple[bytes, str]:
         )
     resp.raise_for_status()
     return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+
+# --- public API (used by routes) -----------------------------------------
+def put_object(path: str, data: bytes, content_type: str) -> dict:
+    backend = _storage_backend()
+    if backend == "local":
+        return _local_put(path, data, content_type)
+    if backend == "s3":
+        return _s3_put(path, data, content_type)
+    return _emergent_put(path, data, content_type)
+
+
+def get_object(path: str) -> tuple[bytes, str]:
+    backend = _storage_backend()
+    if backend == "local":
+        return _local_get(path)
+    if backend == "s3":
+        return _s3_get(path)
+    return _emergent_get(path)
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +327,8 @@ class OrderCreate(BaseModel):
     voucher_code: Optional[str] = None
     asuransi: bool = False
     asuransi_fee: float = 0
+    payment_method: str = "transfer"  # transfer | cod
+    cod_disbursement_type: str = "7_days"  # 7_days | 5_days | 3_days
 
 
 class ShippingSettingsIn(BaseModel):
@@ -716,9 +810,27 @@ async def _biteship_order_payload(order: dict, courier_company: Optional[str] = 
     if not origin:
         raise HTTPException(status_code=400, detail="Alamat toko belum diatur")
     dest = order.get("shipping_coordinate") or {}
-    if not dest.get("latitude"):
-        raise HTTPException(status_code=400, detail="Koordinat alamat pembeli tidak ada")
     alamat = order.get("alamat") or {}
+    company = (courier_company or order.get("courier_company") or "").strip().lower()
+    service = (courier_type or order.get("courier_type") or "").strip().lower()
+    is_instant = company in {"gojek", "grab", "lalamove"} or service in {
+        "instant", "instant-bike", "instant-car", "same_day", "same-day"
+    }
+    is_cod = (order.get("payment_method") or "").strip().lower() == "cod" or bool(order.get("is_cod"))
+
+    required = {
+        "nama kontak asal": origin.get("contact_name"),
+        "telepon asal": origin.get("contact_phone"),
+        "alamat asal": origin.get("address"),
+        "nama penerima": alamat.get("nama"),
+        "telepon penerima": alamat.get("wa"),
+        "alamat tujuan": alamat.get("alamat"),
+        "courier_company": company,
+        "courier_type": service,
+    }
+    missing = [name for name, value in required.items() if not str(value or "").strip()]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Data Biteship belum lengkap: {', '.join(missing)}")
     items = [
         {
             "name": it.get("nama_produk") or "Produk",
@@ -736,23 +848,55 @@ async def _biteship_order_payload(order: dict, courier_company: Optional[str] = 
         "origin_contact_phone": origin["contact_phone"],
         "origin_address": origin["address"],
         "origin_coordinate": {"latitude": origin["latitude"], "longitude": origin["longitude"]},
-        "destination_contact_name": alamat.get("nama") or "Penerima",
-        "destination_contact_phone": alamat.get("wa") or "",
-        "destination_address": alamat.get("alamat") or "",
-        "destination_coordinate": {"latitude": dest["latitude"], "longitude": dest["longitude"]},
-        "courier_company": courier_company or order.get("courier_company"),
-        "courier_type": courier_type or order.get("courier_type"),
+        "destination_contact_name": alamat["nama"],
+        "destination_contact_phone": alamat["wa"],
+        "destination_address": alamat["alamat"],
+        "courier_company": company,
+        "courier_type": service,
         "delivery_type": "now",
         "items": items,
     }
-    # Biteship requires postal codes (integer) for most couriers — we have them
-    # on the store location and the buyer address, so always send them.
+    if origin.get("note"):
+        body["origin_note"] = origin["note"]
+    if order.get("catatan"):
+        body["destination_note"] = order["catatan"]
+        body["order_note"] = order["catatan"]
+
+    # Instant couriers require coordinates. Standard and COD orders follow the
+    # documented postal-code payload, with coordinates as a safe fallback when
+    # either postal code is unavailable.
     origin_pc = str(origin.get("postal_code") or "").strip()
     dest_pc = str(alamat.get("kode_pos") or "").strip()
-    if origin_pc.isdigit():
-        body["origin_postal_code"] = int(origin_pc)
-    if dest_pc.isdigit():
-        body["destination_postal_code"] = int(dest_pc)
+    have_origin_coord = origin.get("latitude") is not None and origin.get("longitude") is not None
+    have_dest_coord = dest.get("latitude") is not None and dest.get("longitude") is not None
+    if is_instant:
+        if not have_origin_coord or not have_dest_coord:
+            raise HTTPException(status_code=400, detail="Kurir instant memerlukan koordinat asal dan tujuan")
+        body["origin_coordinate"] = {"latitude": origin["latitude"], "longitude": origin["longitude"]}
+        body["destination_coordinate"] = {"latitude": dest["latitude"], "longitude": dest["longitude"]}
+    else:
+        if origin_pc.isdigit():
+            body["origin_postal_code"] = int(origin_pc)
+        elif have_origin_coord:
+            body["origin_coordinate"] = {"latitude": origin["latitude"], "longitude": origin["longitude"]}
+        else:
+            raise HTTPException(status_code=400, detail="Kode pos atau koordinat asal Biteship belum ada")
+        if dest_pc.isdigit():
+            body["destination_postal_code"] = int(dest_pc)
+        elif have_dest_coord:
+            body["destination_coordinate"] = {"latitude": dest["latitude"], "longitude": dest["longitude"]}
+        else:
+            raise HTTPException(status_code=400, detail="Kode pos atau koordinat tujuan Biteship belum ada")
+
+    if is_cod:
+        cod_type = (order.get("cod_disbursement_type") or "7_days").strip().lower()
+        if cod_type not in {"7_days", "5_days", "3_days"}:
+            raise HTTPException(status_code=400, detail="Tipe pencairan COD harus 7_days, 5_days, atau 3_days")
+        cod_amount = int(order.get("total") or 0)
+        if cod_amount <= 0:
+            raise HTTPException(status_code=400, detail="Nilai COD harus lebih dari 0")
+        body["destination_cash_on_delivery"] = cod_amount
+        body["destination_cash_on_delivery_type"] = cod_type
     # Register courier insurance when the buyer paid for it (declared value = goods subtotal).
     if order.get("asuransi"):
         body["courier_insurance"] = int(order.get("subtotal") or 0)
@@ -1111,8 +1255,149 @@ async def serve_file(path: str):
 
 
 # ---------------------------------------------------------------------------
-# AI helpers (Emergent Universal LLM key) — auto product info + photo enhance
+# AI (Emergent LLM key | OpenAI-compatible fallback, e.g. 9Router)
 # ---------------------------------------------------------------------------
+# Priority: EMERGENT_LLM_KEY present & provider reachable -> Emergent LlmChat.
+# Otherwise -> OpenAI-compatible chat-completions at OPENAI_BASE_URL with
+# OPENAI_API_KEY. Set both and the OpenAI-compatible path wins, so migration
+# to 9Router later is a pure env swap. Vision on the fallback path is handled
+# by the base_url provider through the standard image_url content part.
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "").rstrip("/")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+AI_VISION_MODEL = os.environ.get("AI_VISION_MODEL", "gemini-3-flash-preview")
+AI_IMAGE_MODEL = os.environ.get("AI_IMAGE_MODEL", "gemini-3.1-flash-image-preview")
+
+_multi_modal_roles = None  # cached from first response
+
+
+def _use_openai_compat() -> bool:
+    return bool(OPENAI_BASE_URL and OPENAI_API_KEY)
+
+
+def _openai_client():
+    from openai import OpenAI
+    return OpenAI(base_url=OPENAI_BASE_URL, api_key=OPENAI_API_KEY)
+
+
+def _extract_json_obj(raw: str) -> dict:
+    raw = (raw or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.DOTALL)
+    try:
+        return json.loads(raw)
+    except Exception:
+        m = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+        return json.loads(m.group(0)) if m else {}
+
+
+# --- OpenAI-compatible fallback paths --------------------------------------
+def _compat_product_info(b64: str, mime: str = "image/jpeg") -> str:
+    client = _openai_client()
+    resp = client.chat.completions.create(
+        model=AI_VISION_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Anda asisten katalog toko online fashion di Indonesia. Lihat foto produk lalu buat "
+                    "data produk dalam Bahasa Indonesia yang menjual. Balas HANYA JSON valid (tanpa teks "
+                    "lain, tanpa markdown) dengan kunci persis: nama_produk (singkat & menarik, maks 8 kata), "
+                    "deskripsi (2-4 kalimat, sebut bahan/warna/model/kegunaan jika terlihat), kategori "
+                    "(satu kata/frasa singkat mis. Baju, Tas, Sepatu, Aksesoris, Celana). Jangan mengarang harga."
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Buatkan nama_produk, deskripsi, dan kategori untuk produk pada foto ini. Balas JSON saja."},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                ],
+            },
+        ],
+        max_tokens=700,
+        temperature=0.2,
+    )
+    return resp.choices[0].message.content or ""
+
+
+def _image_from_data_url(value: object) -> Optional[dict]:
+    if not isinstance(value, str) or not value.startswith("data:image/") or "," not in value:
+        return None
+    header, data = value.split(",", 1)
+    mime = header[5:].split(";", 1)[0] or "image/png"
+    if not data:
+        return None
+    return {"data": data, "mime_type": mime}
+
+
+def _compat_response_images(resp: object) -> list[dict]:
+    """Extract image data URLs from common OpenAI-compatible chat shapes."""
+    choices = getattr(resp, "choices", None) or []
+    msg = getattr(choices[0], "message", None) if choices else None
+    found: list[dict] = []
+    if msg is None:
+        return found
+
+    for image in (getattr(msg, "images", None) or []):
+        image_url = getattr(image, "image_url", None)
+        value = getattr(image_url, "url", None) if image_url is not None else None
+        parsed = _image_from_data_url(value)
+        if parsed:
+            found.append(parsed)
+
+    content = getattr(msg, "content", None)
+    if isinstance(content, str):
+        parsed = _image_from_data_url(content.strip())
+        if parsed:
+            found.append(parsed)
+        else:
+            match = re.search(r"data:image/[^;\s]+;base64,[A-Za-z0-9+/=]+", content)
+            parsed = _image_from_data_url(match.group(0)) if match else None
+            if parsed:
+                found.append(parsed)
+    elif isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict):
+                image_url = part.get("image_url") or part.get("url")
+                value = image_url.get("url") if isinstance(image_url, dict) else image_url
+            else:
+                image_url = getattr(part, "image_url", None)
+                value = getattr(image_url, "url", None) if image_url is not None else getattr(part, "url", None)
+            parsed = _image_from_data_url(value)
+            if parsed:
+                found.append(parsed)
+    return found
+
+
+def _compat_enhance_photo(b64: str, mime: str = "image/jpeg") -> tuple[str, list[dict]]:
+    client = _openai_client()
+    prompt = (
+        "Edit this product photo into a clean, professional e-commerce advertising photo suitable "
+        "for an online shop listing. Place the product on a soft, neutral studio background with "
+        "bright, even lighting and a subtle natural shadow. Remove clutter and any distracting "
+        "background. Keep the product itself EXACTLY the same (same shape, color, texture, logo) and "
+        "centered. Square framing, high quality, realistic."
+    )
+    resp = None
+    try:
+        # 9Router translates OpenAI-compatible multimodal chat requests to the
+        # selected image-capable provider. The model must support image output.
+        resp = client.chat.completions.create(
+            model=AI_IMAGE_MODEL,
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+            ]}],
+            modalities=["text", "image"],
+            max_tokens=4000,
+        )
+    except Exception as e:
+        logger.error(f"OpenAI-compatible image edit error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail="Gagal memproses foto dengan AI")
+    images = _compat_response_images(resp)
+    if images:
+        return "", images
+    raise HTTPException(status_code=502, detail="AI tidak menghasilkan foto")
 def _storage_path_from_url(foto_url: str) -> Optional[str]:
     """Resolve an app photo reference to its object-storage path."""
     if not foto_url:
@@ -1145,12 +1430,27 @@ class AiPhotoIn(BaseModel):
 
 @api_router.post("/admin/ai/product-info")
 async def ai_product_info(payload: AiPhotoIn, admin: dict = Depends(require_admin)):
-    if not EMERGENT_KEY:
+    if not _use_openai_compat() and not EMERGENT_KEY:
         raise HTTPException(status_code=503, detail="AI belum dikonfigurasi")
     try:
-        b64, _mime = await run_in_threadpool(_load_image_b64, payload.foto_url)
+        b64, mime = await run_in_threadpool(_load_image_b64, payload.foto_url)
     except Exception:
         raise HTTPException(status_code=400, detail="Foto tidak dapat dibaca")
+
+    if _use_openai_compat():
+        try:
+            raw = await run_in_threadpool(_compat_product_info, b64, mime)
+            data = _extract_json_obj(raw)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"OpenAI-compatible product-info error: {type(e).__name__}: {e}")
+            raise HTTPException(status_code=502, detail="Gagal membuat data AI")
+        return {
+            "nama_produk": (data.get("nama_produk") or "").strip()[:120],
+            "deskripsi": (data.get("deskripsi") or "").strip()[:1500],
+            "kategori": (data.get("kategori") or "").strip()[:60],
+        }
 
     from emergentintegrations.llm.chat import ImageContent, LlmChat, StreamDone, TextDelta, UserMessage
 
@@ -1198,34 +1498,37 @@ async def ai_product_info(payload: AiPhotoIn, admin: dict = Depends(require_admi
 
 @api_router.post("/admin/ai/enhance-photo")
 async def ai_enhance_photo(payload: AiPhotoIn, admin: dict = Depends(require_admin)):
-    if not EMERGENT_KEY:
+    if not _use_openai_compat() and not EMERGENT_KEY:
         raise HTTPException(status_code=503, detail="AI belum dikonfigurasi")
     try:
-        b64, _mime = await run_in_threadpool(_load_image_b64, payload.foto_url)
+        b64, mime = await run_in_threadpool(_load_image_b64, payload.foto_url)
     except Exception:
         raise HTTPException(status_code=400, detail="Foto tidak dapat dibaca")
 
-    from emergentintegrations.llm.chat import ImageContent, LlmChat, UserMessage
+    if _use_openai_compat():
+        _text, images = await run_in_threadpool(_compat_enhance_photo, b64, mime)
+    else:
+        from emergentintegrations.llm.chat import ImageContent, LlmChat, UserMessage
 
-    chat = LlmChat(
-        api_key=EMERGENT_KEY,
-        session_id=f"enhance_{uuid.uuid4().hex[:8]}",
-        system_message="You are a professional e-commerce product photo retoucher.",
-    ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
+        chat = LlmChat(
+            api_key=EMERGENT_KEY,
+            session_id=f"enhance_{uuid.uuid4().hex[:8]}",
+            system_message="You are a professional e-commerce product photo retoucher.",
+        ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
 
-    prompt = (
-        "Edit this product photo into a clean, professional e-commerce advertising photo suitable "
-        "for an online shop listing. Place the product on a soft, neutral studio background with "
-        "bright, even lighting and a subtle natural shadow. Remove clutter and any distracting "
-        "background. Keep the product itself EXACTLY the same (same shape, color, texture, logo) and "
-        "centered. Square framing, high quality, realistic."
-    )
-    msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=b64)])
-    try:
-        _text, images = await chat.send_message_multimodal_response(msg)
-    except Exception as e:
-        logger.error(f"AI enhance error: {e}")
-        raise HTTPException(status_code=502, detail="Gagal memproses foto dengan AI")
+        prompt = (
+            "Edit this product photo into a clean, professional e-commerce advertising photo suitable "
+            "for an online shop listing. Place the product on a soft, neutral studio background with "
+            "bright, even lighting and a subtle natural shadow. Remove clutter and any distracting "
+            "background. Keep the product itself EXACTLY the same (same shape, color, texture, logo) and "
+            "centered. Square framing, high quality, realistic."
+        )
+        msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=b64)])
+        try:
+            _text, images = await chat.send_message_multimodal_response(msg)
+        except Exception as e:
+            logger.error(f"AI enhance error: {e}")
+            raise HTTPException(status_code=502, detail="Gagal memproses foto dengan AI")
     if not images:
         raise HTTPException(status_code=502, detail="AI tidak menghasilkan foto")
 
@@ -2077,6 +2380,8 @@ def order_public(o: dict) -> dict:
         "ongkir": o.get("ongkir", 0),
         "asuransi": o.get("asuransi", False),
         "asuransi_fee": o.get("asuransi_fee", 0),
+        "payment_method": o.get("payment_method", "transfer"),
+        "cod_disbursement_type": o.get("cod_disbursement_type"),
         "total": o.get("total", 0),
         "status": o.get("status"),
         "no_resi": o.get("no_resi"),
@@ -2263,6 +2568,12 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
         raise HTTPException(status_code=400, detail="Keranjang kosong")
     if not user.get("alamat") or not user.get("kota"):
         raise HTTPException(status_code=400, detail="Lengkapi alamat pengiriman terlebih dahulu")
+    payment_method = (payload.payment_method or "transfer").strip().lower()
+    if payment_method not in {"transfer", "cod"}:
+        raise HTTPException(status_code=400, detail="Metode pembayaran tidak valid")
+    cod_disbursement_type = (payload.cod_disbursement_type or "7_days").strip().lower()
+    if payment_method == "cod" and cod_disbursement_type not in {"7_days", "5_days", "3_days"}:
+        raise HTTPException(status_code=400, detail="Tipe pencairan COD tidak valid")
 
     # Load products and validate stock.
     order_items = []
@@ -2342,6 +2653,7 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
     now = datetime.now(timezone.utc)
     no_order = f"DS-{now.strftime('%y%m%d')}-{secrets.token_hex(2).upper()}"
 
+    initial_status = "sedang_dikemas" if payment_method == "cod" else "menunggu_pembayaran"
     order = {
         "id": uuid.uuid4().hex,
         "no_order": no_order,
@@ -2354,8 +2666,8 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
         "asuransi": bool(payload.asuransi),
         "asuransi_fee": asuransi_fee,
         "total": total,
-        "status": "menunggu_pembayaran",
-        "status_history": [{"status": "menunggu_pembayaran", "at": now}],
+        "status": initial_status,
+        "status_history": [{"status": initial_status, "at": now}],
         "alamat": {
             "nama": user.get("nama"),
             "wa": user.get("wa"),
@@ -2368,6 +2680,8 @@ async def create_order(payload: OrderCreate, user: dict = Depends(get_current_us
         "shipping_coordinate": payload.shipping_coordinate,
         "courier_company": payload.courier_company,
         "courier_type": payload.courier_type,
+        "payment_method": payment_method,
+        "cod_disbursement_type": cod_disbursement_type if payment_method == "cod" else None,
         "bukti_bayar_url": None,
         "created_at": now,
         "deleted_at": None,
@@ -2999,11 +3313,13 @@ async def admin_analytics(admin: dict = Depends(require_admin)):
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def on_startup():
-    try:
-        await run_in_threadpool(init_storage)
-        logger.info("Object storage initialized")
-    except Exception as e:
-        logger.warning(f"Object storage init failed: {e}")
+    # Only the legacy Emergent backend needs a network init at boot.
+    if _storage_backend() == "emergent":
+        try:
+            await run_in_threadpool(init_storage)
+            logger.info("Object storage initialized")
+        except Exception as e:
+            logger.warning(f"Object storage init failed: {e}")
 
     await db.users.create_index("user_id", unique=True)
     await db.users.create_index("username", sparse=True)
@@ -3153,6 +3469,37 @@ async def on_startup():
 
 
 app.include_router(api_router)
+
+# ---------------------------------------------------------------------------
+# Liveness & readiness (registered on the FastAPI app BEFORE the Socket.IO
+# wrapper). Docker HEALTHCHECK uses /health; Kubernetes probes may use both.
+# ---------------------------------------------------------------------------
+@app.get("/health")
+async def health():
+    """Application liveness — process is up. No dependency checks."""
+    return Response(
+        content=json.dumps({"status": "ok"}),
+        media_type="application/json",
+        status_code=200,
+    )
+
+
+@app.get("/ready")
+async def ready():
+    """Readiness — MongoDB reachable. 503 when the database is unavailable."""
+    try:
+        await asyncio.wait_for(db.command("ping"), timeout=3.0)
+    except Exception:
+        return Response(
+            content=json.dumps({"status": "error"}),
+            media_type="application/json",
+            status_code=503,
+        )
+    return Response(
+        content=json.dumps({"status": "ok"}),
+        media_type="application/json",
+        status_code=200,
+    )
 
 app.add_middleware(
     CORSMiddleware,
