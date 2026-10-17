@@ -44,6 +44,28 @@ def test_product_info_json_extraction():
     assert data["deskripsi"] == "Deskripsi AI"
 
 
+def test_product_info_normalizes_english_aliases():
+    data = server._normalize_product_info({
+        "product_name": "Tas Baru",
+        "description": "Deskripsi AI",
+        "category": "Tas",
+    })
+    assert data == {
+        "nama_produk": "Tas Baru",
+        "deskripsi": "Deskripsi AI",
+        "kategori": "Tas",
+    }
+
+
+def test_product_info_normalization_ignores_non_string_values():
+    data = server._normalize_product_info({
+        "nama_produk": {"value": "Tas Baru"},
+        "deskripsi": None,
+        "kategori": " Tas ",
+    })
+    assert data == {"kategori": "Tas"}
+
+
 def test_compat_response_text_accepts_plain_string():
     result = server._compat_response_text(
         _response_with(content='{"nama_produk":"Tas Baru"}')

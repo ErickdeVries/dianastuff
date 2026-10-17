@@ -1291,6 +1291,25 @@ def _extract_json_obj(raw: str) -> dict:
         return json.loads(m.group(0)) if m else {}
 
 
+def _normalize_product_info(data: object) -> dict:
+    """Normalize common model field aliases into the API's Indonesian contract."""
+    if not isinstance(data, dict):
+        return {}
+    aliases = {
+        "nama_produk": ("nama_produk", "nama", "product_name", "name", "title"),
+        "deskripsi": ("deskripsi", "description", "product_description"),
+        "kategori": ("kategori", "category", "product_category"),
+    }
+    normalized: dict[str, str] = {}
+    for target, candidates in aliases.items():
+        for candidate in candidates:
+            value = data.get(candidate)
+            if isinstance(value, str) and value.strip():
+                normalized[target] = value.strip()
+                break
+    return normalized
+
+
 def _compat_response_text(resp: object) -> str:
     """Extract text from common OpenAI-compatible chat response shapes."""
     choices = getattr(resp, "choices", None) or []
@@ -1495,6 +1514,25 @@ def _gemini_product_info(b64: str, mime: str = "image/jpeg") -> str:
                     "temperature": 0.2,
                     "maxOutputTokens": 700,
                     "responseMimeType": "application/json",
+                    "responseJsonSchema": {
+                        "type": "object",
+                        "properties": {
+                            "nama_produk": {
+                                "type": "string",
+                                "description": "Nama produk dalam Bahasa Indonesia, maksimal 8 kata",
+                            },
+                            "deskripsi": {
+                                "type": "string",
+                                "description": "Deskripsi produk dalam Bahasa Indonesia, 2-4 kalimat",
+                            },
+                            "kategori": {
+                                "type": "string",
+                                "description": "Kategori produk berupa satu kata atau frasa singkat",
+                            },
+                        },
+                        "required": ["nama_produk", "deskripsi", "kategori"],
+                        "additionalProperties": False,
+                    },
                 },
             },
             timeout=90,
@@ -1600,7 +1638,7 @@ async def ai_product_info(payload: AiPhotoIn, admin: dict = Depends(require_admi
                 raw = await run_in_threadpool(_compat_product_info, b64, mime)
                 provider = "OpenAI-compatible"
                 model = AI_VISION_MODEL
-            data = _extract_json_obj(raw)
+            data = _normalize_product_info(_extract_json_obj(raw))
             if not isinstance(data, dict) or not any(
                 str(data.get(key) or "").strip()
                 for key in ("nama_produk", "deskripsi", "kategori")
